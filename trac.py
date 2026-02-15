@@ -5,7 +5,14 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
 import os
 
-# --- FUNGSI HELPER ---
+# --- KONFIGURASI HALAMAN ---
+st.set_page_config(page_title="Visitor Management TRAC", layout="wide")
+
+# Fungsi Waktu WIB
+def get_waktu_wib():
+    return datetime.utcnow() + timedelta(hours=7)
+
+# Fungsi Format Jam (HHMM -> HH.MM)
 def format_jam(input_jam):
     if not input_jam or input_jam == "-": return "-"
     digits = "".join(filter(str.isdigit, str(input_jam)))
@@ -13,153 +20,141 @@ def format_jam(input_jam):
         return f"{digits[:2]}.{digits[2:]}"
     return input_jam
 
-# 1. Konfigurasi Halaman & Waktu
-st.set_page_config(page_title="Visitor Management TRAC", layout="wide")
-hari_ini_wib = datetime.utcnow() + timedelta(hours=7)
-
-# 2. SISTEM KONEKSI GOOGLE SHEETS
+# --- KONEKSI GOOGLE SHEETS ---
 @st.cache_resource
 def init_connection():
-    # Proteksi: Jika dijalankan di GitHub Codespace tanpa file secrets lokal
-    if len(st.secrets) == 0:
-        st.warning("⚠️ Aplikasi berjalan di lingkungan lokal (Codespaces).")
-        st.info("Untuk melihat hasil database, silakan buka link resmi: https://visitor.streamlit.app/")
-        st.stop()
-
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     try:
-        # Mengambil info dari Secrets (Streamlit Cloud Dashboard)
-        if "gcp_service_account" in st.secrets:
-            creds_info = dict(st.secrets["gcp_service_account"])
-            url = st.secrets["gsheets"]["spreadsheet"]
-        elif "connections" in st.secrets:
-            creds_info = dict(st.secrets["connections"]["gcp_service_account"])
-            url = st.secrets["connections"]["gsheets"]["spreadsheet"]
-        else:
-            st.error("Kunci akses tidak ditemukan di Dashboard Secrets.")
-            st.stop()
-
-        # Pembersihan Private Key dari karakter ilegal
-        creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
-        
+        creds_info = dict(st.secrets["gcp_service_account"])
+        creds_info["private_key"] = creds_info["private_key"].strip().replace("\\n", "\n")
         creds = Credentials.from_service_account_info(creds_info, scopes=scope)
         client = gspread.authorize(creds)
+        url = st.secrets["gsheets"]["spreadsheet"]
         return client.open_by_url(url).sheet1
     except Exception as e:
-        st.error(f"❌ Gagal Koneksi: {e}")
+        st.error(f"❌ Koneksi Gagal: {e}")
         st.stop()
 
-# Menjalankan Koneksi
 sheet = init_connection()
 
-# --- FUNGSI PENGOLAHAN DATA ---
+# --- FUNGSI DATA ---
 def fetch_data():
-    try:
-        data = sheet.get_all_records()
-        if not data:
-            return pd.DataFrame(columns=["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"])
-        return pd.DataFrame(data)
-    except:
+    data = sheet.get_all_records()
+    if not data:
         return pd.DataFrame(columns=["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"])
+    return pd.DataFrame(data)
 
-def sync_to_sheets(dataframe):
-    # Membersihkan nilai kosong agar API Google tidak error
-    dataframe = dataframe.fillna("-")
+def sync_data(df_baru):
+    df_baru = df_baru.fillna("-")
     sheet.clear()
-    sheet.update([dataframe.columns.values.tolist()] + dataframe.values.tolist())
+    sheet.update([df_baru.columns.values.tolist()] + df_baru.values.tolist())
 
 # Load data awal
 df = fetch_data()
+waktu_skrg = get_waktu_wib()
+tgl_hari_ini = waktu_skrg.strftime("%d-%m-%Y")
 
-# 3. UI Header
-col_logo, col_title = st.columns([1, 4])
-with col_logo:
-    if os.path.exists("trac.png"):
-        st.image("trac.png", width=180)
+# --- UI HEADER ---
+st.title("🏛️ Visitor Management - GRHA TRAC")
+st.markdown(f"**Hari Ini:** {waktu_skrg.strftime('%A, %d %B %Y')}")
+
+# --- SECTION 1: SUMMARY DASHBOARD ---
+st.subheader("📊 Summary Pengunjung")
+col1, col2, col3, col4 = st.columns(4)
+
+# Filter data hari ini saja untuk statistik harian
+df_hari_ini = df[df['Tanggal'] == tgl_hari_ini]
+
+col1.metric("Tamu Aktif (IN)", len(df[df['Status'] == 'IN']))
+col2.metric("Tamu Keluar (OUT)", len(df[df['Status'] == 'OUT']))
+col3.metric("Tamu Baru Hari Ini", len(df_hari_ini))
+col4.metric("Total Seluruh Riwayat", len(df))
+
+# Summary Pengunjung Sering Datang (Loyalty)
+if not df.empty:
+    st.markdown("---")
+    st.subheader("⭐ Pengunjung Sering Datang (Frequent Visitors)")
+    # Hitung frekuensi berdasarkan No KTP
+    loyalty_df = df['No KTP'].value_counts().reset_index()
+    loyalty_df.columns = ['No KTP', 'Frekuensi Datang']
+    
+    # Ambil Nama terakhir untuk No KTP tersebut
+    nama_map = df.drop_duplicates('No KTP', keep='last')[['No KTP', 'Nama']]
+    loyalty_df = loyalty_df.merge(nama_map, on='No KTP')
+    
+    # Tampilkan yang datang > 1 kali
+    frequent = loyalty_df[loyalty_df['Frekuensi Datang'] > 1].sort_values('Frekuensi Datang', ascending=False)
+    if not frequent.empty:
+        st.table(frequent[['Nama', 'No KTP', 'Frekuensi Datang']].head(5))
     else:
-        st.markdown("### [TRAC]")
-
-with col_title:
-    st.title("Visitor Management GRHA Trac Condet")
-    st.success(f"🌐 **Sistem Online | Database: Terkoneksi | {hari_ini_wib.strftime('%d %B %Y')}**")
+        st.info("Belum ada pengunjung yang tercatat datang lebih dari satu kali.")
 
 st.markdown("---")
 
-# 4. Statistik & Filter
-st.sidebar.header("🔍 Pencarian")
-search_ktp = st.sidebar.text_input("Cari No KTP Tamu:")
-df_display = df.copy()
-if search_ktp:
-    df_display = df_display[df_display['No KTP'].astype(str).str.contains(search_ktp)]
+# --- SECTION 2: MENU TAB ---
+tab1, tab2 = st.tabs(["📋 Daftar Pengunjung", "➕ Registrasi Tamu Baru"])
 
-c1, c2, c3 = st.columns(3)
-c1.metric("Tamu di Dalam (IN)", len(df[df['Status'] == 'IN']))
-c2.metric("Tamu Keluar (OUT)", len(df[df['Status'] == 'OUT']))
-c3.metric("Total Riwayat", len(df))
-
-# 5. Tab Menu
-tab_data, tab_edit = st.tabs(["📊 Daftar Pengunjung", "⚙️ Kelola / Edit Data"])
-
-with tab_data:
-    st.dataframe(df_display, use_container_width=True, hide_index=True)
-
-with tab_edit:
-    if not df.empty:
-        for index, row in df.iterrows():
-            with st.expander(f"Edit: {row['Nama']} (ID: {row['Visitor Id']})"):
-                en = st.text_input("Nama", value=row['Nama'], key=f"en_{index}")
-                es = st.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1, key=f"es_{index}")
-                
-                b1, b2 = st.columns(2)
-                if b1.button("Simpan", key=f"sv_{index}"):
-                    df.at[index, 'Nama'] = en
-                    df.at[index, 'Status'] = es
-                    sync_to_sheets(df)
-                    st.rerun()
-                if b2.button("Hapus", key=f"dl_{index}"):
-                    df = df.drop(index).reset_index(drop=True)
-                    df['No'] = range(1, len(df) + 1)
-                    sync_to_sheets(df)
-                    st.rerun()
-
-st.markdown("---")
-
-# 6. Form Input (Check-In & Out)
-if "tick" not in st.session_state: st.session_state.tick = 0
-t = st.session_state.tick
-
-col_in, col_out = st.columns(2)
-
-with col_in:
-    st.subheader("➕ Check In")
-    with st.form("form_in", clear_on_submit=True):
-        f_nama = st.text_input("Nama Lengkap")
-        f_ktp = st.text_input("Nomor KTP")
-        f_vid = st.text_input("Visitor ID")
-        f_jam = st.text_input("Jam Masuk (Contoh: 0800)")
-        if st.form_submit_button("Simpan Masuk", type="primary"):
-            if f_nama and f_ktp and f_vid:
-                new_row = {
-                    "No": len(df) + 1, "Tanggal": hari_ini_wib.strftime("%d-%b"),
-                    "Nama": f_nama, "No KTP": f_ktp, "Keperluan": "Kunjungan",
-                    "Jumlah Tamu": 1, "Visitor Id": f_vid,
-                    "Jam Masuk": format_jam(f_jam), "Jam Keluar": "-", "Status": "IN"
-                }
-                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                sync_to_sheets(df)
-                st.rerun()
-
-with col_out:
-    st.subheader("🚪 Check Out")
-    list_in = df[df['Status'] == 'IN']['Nama'].tolist()
-    if list_in:
-        with st.form("form_out", clear_on_submit=True):
-            f_pilih = st.selectbox("Pilih Tamu", ["-- Pilih --"] + list_in)
-            f_jam_o = st.text_input("Jam Keluar (Contoh: 1700)")
-            if st.form_submit_button("Konfirmasi Keluar"):
-                if f_pilih != "-- Pilih --" and f_jam_o:
-                    idx = df[df['Nama'] == f_pilih].index[-1]
-                    df.at[idx, 'Jam Keluar'] = format_jam(f_jam_o)
+with tab1:
+    st.subheader("Detail Data")
+    # Filter pencarian di sidebar
+    search = st.text_input("Cari Nama atau No KTP:")
+    df_filtered = df.copy()
+    if search:
+        df_filtered = df[df['Nama'].str.contains(search, case=False) | df['No KTP'].astype(str).str.contains(search)]
+    
+    st.dataframe(df_filtered, use_container_width=True, hide_index=True)
+    
+    # Fitur Check-Out
+    list_aktif = df[df['Status'] == 'IN']['Nama'].tolist()
+    if list_aktif:
+        with st.expander("🚪 Proses Check-Out Tamu"):
+            with st.form("form_checkout"):
+                tamu_pilih = st.selectbox("Pilih Tamu", list_aktif)
+                jam_out = st.text_input("Jam Keluar (HHMM, contoh: 1630)")
+                if st.form_submit_button("Konfirmasi Keluar"):
+                    idx = df[df['Nama'] == tamu_pilih].index[-1]
+                    df.at[idx, 'Jam Keluar'] = format_jam(jam_out)
                     df.at[idx, 'Status'] = 'OUT'
-                    sync_to_sheets(df)
+                    sync_data(df)
                     st.rerun()
+
+with tab2:
+    st.subheader("Form Input Tamu")
+    with st.form("form_checkin", clear_on_submit=True):
+        c_a, c_b = st.columns(2)
+        
+        with c_a:
+            in_tgl = st.text_input("Tanggal", value=tgl_hari_ini)
+            in_nama = st.text_input("Nama Lengkap")
+            in_ktp = st.text_input("Nomor KTP")
+            in_perlu = st.text_input("Keperluan (Contoh: Meeting, Kurir, Vendor)")
+            
+        with c_b:
+            in_id = st.text_input("Visitor ID / No. Kartu")
+            in_jumlah = st.number_input("Jumlah Tamu", min_value=1, step=1)
+            in_jam = st.text_input("Jam Masuk (HHMM, contoh: 0900)")
+            in_status = st.selectbox("Status Awal", ["IN", "OUT"])
+
+        submit = st.form_submit_button("Simpan Data Pengunjung", type="primary")
+        
+        if submit:
+            if in_nama and in_ktp and in_id:
+                new_entry = {
+                    "No": len(df) + 1,
+                    "Tanggal": in_tgl,
+                    "Nama": in_nama,
+                    "No KTP": in_ktp,
+                    "Keperluan": in_perlu,
+                    "Jumlah Tamu": int(in_jumlah),
+                    "Visitor Id": in_id,
+                    "Jam Masuk": format_jam(in_jam),
+                    "Jam Keluar": "-",
+                    "Status": in_status
+                }
+                
+                df_updated = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
+                sync_data(df_updated)
+                st.success(f"Berhasil mencatat kunjungan {in_nama}!")
+                st.rerun()
+            else:
+                st.error("Mohon isi minimal Nama, KTP, dan Visitor ID.")
