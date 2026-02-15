@@ -47,7 +47,6 @@ def fetch_data():
             return pd.DataFrame(columns=["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"])
         df = pd.DataFrame(data)
         df = df.dropna(how='all')
-        # Konversi tanggal untuk filter riwayat
         df['Tanggal_Filter'] = pd.to_datetime(df['Tanggal'], dayfirst=True, errors='coerce')
         return df
     except:
@@ -78,27 +77,30 @@ with col_text:
 
 st.markdown("---")
 
-# --- SIDEBAR (FITUR PENCARIAN KTP KEMBALI DI SINI) ---
+# --- SIDEBAR (PENCARIAN KTP DENGAN INFO KEPERLUAN) ---
 st.sidebar.title("🔍 Fitur Pencarian")
 
-# 1. Pencarian Riwayat KTP
 st.sidebar.subheader("Cek Riwayat KTP")
 search_ktp = st.sidebar.text_input("Input No KTP Pengunjung:")
 if search_ktp:
-    # Cari berdasarkan KTP (pastikan tipe data sama)
-    history = df[df['No KTP'].astype(str) == search_ktp]
+    # Cari riwayat berdasarkan No KTP
+    history = df[df['No KTP'].astype(str) == search_ktp].copy()
     if not history.empty:
-        st.sidebar.success(f"**Nama:** {history['Nama'].iloc[-1]}")
-        st.sidebar.info(f"📋 Pengunjung ini sudah bertamu sebanyak **{len(history)} kali**.")
+        nama_tamu = history['Nama'].iloc[-1]
+        st.sidebar.success(f"**Nama:** {nama_tamu}")
+        st.sidebar.info(f"📋 Total Kunjungan: **{len(history)} kali**")
+        
+        # MENAMPILKAN DAFTAR KEPERLUAN
+        st.sidebar.write("**Daftar Keperluan Sebelumnya:**")
+        # Mengambil riwayat tanggal dan keperluan, diurutkan dari yang terbaru
+        history_summary = history[['Tanggal', 'Keperluan']].sort_index(ascending=False)
+        st.sidebar.dataframe(history_summary, hide_index=True, use_container_width=True)
     else:
         st.sidebar.warning("Data KTP belum pernah terdaftar.")
 
 st.sidebar.markdown("---")
-
-# 2. Filter Tampilan Tabel
 view_option = st.sidebar.selectbox("Lihat Daftar Utama:", ["Hari Ini Saja", "Semua Riwayat"])
 
-# 3. Rekap Total Tamu
 filter_tgl = st.sidebar.date_input("Total Tamu per Tanggal", waktu_skrg)
 if not df.empty:
     df_rekap = df[df['Tanggal_Filter'].dt.date == filter_tgl]
@@ -109,7 +111,6 @@ if not df.empty:
 tab_reg, tab_manage = st.tabs(["📝 Registrasi & Daftar", "⚙️ Kelola Data"])
 
 with tab_reg:
-    # Tabel Daftar (Otomatis menyesuaikan jumlah baris)
     st.subheader(f"📋 List Pengunjung ({view_option})")
     df_display = df[df['Tanggal'] == tgl_str] if view_option == "Hari Ini Saja" else df.copy()
 
@@ -137,7 +138,6 @@ with tab_reg:
             in_jml = st.number_input("Jumlah Tamu", min_value=1, step=1, value=1)
             in_jam = st.text_input("Jam Masuk (Contoh: 0800)")
             
-            # Wajib Klik Tombol
             btn_simpan = st.form_submit_button("💾 KLIK DI SINI UNTUK SIMPAN", type="primary")
             
             if btn_simpan:
@@ -188,10 +188,12 @@ with tab_manage:
                 with st.form(f"form_edit_{index}"):
                     en = st.text_input("Nama", value=row['Nama'])
                     ek = st.text_input("KTP", value=str(row['No KTP']))
+                    ep = st.text_input("Keperluan", value=row['Keperluan'])
                     es = st.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1)
                     if st.form_submit_button("SIMPAN PERUBAHAN"):
                         df.at[index, 'Nama'] = en
                         df.at[index, 'No KTP'] = ek
+                        df.at[index, 'Keperluan'] = ep
                         df.at[index, 'Status'] = es
                         sync_data(df)
                         st.rerun()
