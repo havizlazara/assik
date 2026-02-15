@@ -91,7 +91,7 @@ if not df.empty:
 tab_reg, tab_manage = st.tabs(["📝 Registrasi & Daftar", "⚙️ Kelola Data"])
 
 with tab_reg:
-    # 1. Daftar Pengunjung (Tampilan Menyesuaikan Jumlah Data)
+    # 1. Daftar Pengunjung
     st.subheader(f"📋 List Pengunjung ({view_option})")
     df_display = df[df['Tanggal'] == tgl_str] if view_option == "Hari Ini Saja" else df.copy()
 
@@ -111,8 +111,8 @@ with tab_reg:
     
     with col_in:
         st.subheader("➕ Check-In")
-        # Menggunakan st.form agar penekanan Enter tidak memicu rerun otomatis
-        with st.form("form_checkin", clear_on_submit=True):
+        # Menggunakan st.form dengan tombol fisik sebagai pemicu tunggal
+        with st.form("form_registrasi", clear_on_submit=True):
             in_tgl = st.date_input("Tanggal", waktu_skrg)
             in_nama = st.text_input("Nama Lengkap")
             in_ktp = st.text_input("Nomor KTP")
@@ -121,26 +121,27 @@ with tab_reg:
             in_jml = st.number_input("Jumlah Tamu", min_value=1, step=1, value=1)
             in_jam = st.text_input("Jam Masuk (Contoh: 0830)")
             
-            # Variabel penentu: Data HANYA diproses jika tombol ini diklik
-            submitted = st.form_submit_button("💾 Simpan Data Tamu", type="primary")
+            # Label tombol diubah agar jelas
+            submitted = st.form_submit_button("KLIK UNTUK SIMPAN DATA", type="primary")
             
+            # Logika Eksekusi: Harus menekan tombol secara eksplisit
             if submitted:
                 if in_nama and in_ktp:
-                    # Proses pembersihan jam dilakukan hanya saat submit
-                    jam_fix = format_jam(in_jam)
-                    new_row = {
-                        "No": len(df) + 1,
-                        "Tanggal": in_tgl.strftime("%d-%m-%Y"),
-                        "Nama": in_nama, "No KTP": in_ktp, "Keperluan": in_perlu,
-                        "Jumlah Tamu": int(in_jml), "Visitor Id": in_id,
-                        "Jam Masuk": jam_fix, "Jam Keluar": "-", "Status": "IN"
-                    }
-                    df_upd = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                    sync_data(df_upd)
-                    st.success(f"Berhasil: {in_nama} terdaftar.")
-                    st.rerun()
+                    with st.spinner('Menyimpan ke database...'):
+                        jam_fix = format_jam(in_jam)
+                        new_row = {
+                            "No": len(df) + 1,
+                            "Tanggal": in_tgl.strftime("%d-%m-%Y"),
+                            "Nama": in_nama, "No KTP": in_ktp, "Keperluan": in_perlu,
+                            "Jumlah Tamu": int(in_jml), "Visitor Id": in_id,
+                            "Jam Masuk": jam_fix, "Jam Keluar": "-", "Status": "IN"
+                        }
+                        df_upd = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                        sync_data(df_upd)
+                        st.success(f"Berhasil: {in_nama} tersimpan!")
+                        st.rerun()
                 else:
-                    st.error("Gagal: Nama dan No KTP tidak boleh kosong!")
+                    st.warning("⚠️ Gagal: Nama dan No KTP wajib diisi!")
 
     with col_out:
         st.subheader("🚪 Check-Out")
@@ -150,7 +151,7 @@ with tab_reg:
                 t_out = st.selectbox("Pilih Nama Tamu", list_aktif)
                 j_out = st.text_input("Jam Keluar (Contoh: 1700)")
                 
-                confirmed = st.form_submit_button("🚪 Konfirmasi Keluar")
+                confirmed = st.form_submit_button("KLIK KONFIRMASI KELUAR")
                 
                 if confirmed:
                     if t_out and j_out:
@@ -162,7 +163,7 @@ with tab_reg:
                         st.success(f"{t_out} keluar.")
                         st.rerun()
         else:
-            st.info("Tidak ada tamu berstatus IN saat ini.")
+            st.info("Tidak ada tamu berstatus IN.")
 
 # --- TAB 2: MANAJEMEN DATA ---
 with tab_manage:
@@ -179,7 +180,7 @@ with tab_manage:
                     ep = st.text_input("Keperluan", value=row['Keperluan'])
                     es = st.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1)
                     
-                    if st.form_submit_button("Simpan Perubahan"):
+                    if st.form_submit_button("SIMPAN PERUBAHAN"):
                         df.at[index, 'Nama'] = en
                         df.at[index, 'No KTP'] = ek
                         df.at[index, 'Keperluan'] = ep
