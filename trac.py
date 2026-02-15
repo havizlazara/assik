@@ -12,10 +12,9 @@ st.set_page_config(page_title="Visitor Management TRAC", layout="wide")
 def get_waktu_wib():
     return datetime.utcnow() + timedelta(hours=7)
 
-# Fungsi Format Jam Otomatis (HHMM -> HH:00)
+# Fungsi Format Jam Otomatis (HHMM -> HH:MM)
 def format_jam(input_jam):
     if not input_jam or input_jam == "-": return "-"
-    # Ambil hanya angka saja
     digits = "".join(filter(str.isdigit, str(input_jam)))
     if len(digits) == 4:
         return f"{digits[:2]}:{digits[2:]}"
@@ -54,9 +53,15 @@ def fetch_data():
         return pd.DataFrame(columns=["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"])
 
 def sync_data(df_baru):
+    # Logika Reset Nomor Urut:
+    # Memastikan kolom 'No' diatur ulang dari 1 hingga jumlah baris terakhir
+    if not df_baru.empty:
+        df_baru = df_baru.reset_index(drop=True)
+        df_baru['No'] = range(1, len(df_baru) + 1)
+    
     if 'Tanggal_Filter' in df_baru.columns:
         df_baru = df_baru.drop(columns=['Tanggal_Filter'])
-    df_baru['No'] = range(1, len(df_baru) + 1)
+    
     df_baru = df_baru.fillna("-")
     sheet.clear()
     sheet.update([df_baru.columns.values.tolist()] + df_baru.values.tolist())
@@ -78,7 +83,7 @@ with col_text:
 
 st.markdown("---")
 
-# --- SIDEBAR (CEK RIWAYAT KTP) ---
+# --- SIDEBAR (PENCARIAN KTP) ---
 st.sidebar.title("🔍 Fitur Pencarian")
 st.sidebar.subheader("Cek Riwayat KTP")
 search_ktp = st.sidebar.text_input("Input No KTP Pengunjung:")
@@ -97,10 +102,11 @@ if search_ktp:
 st.sidebar.markdown("---")
 view_option = st.sidebar.selectbox("Lihat Daftar Utama:", ["Hari Ini Saja", "Semua Riwayat"])
 
-# --- UI UTAMA DENGAN TAB ---
+# --- UI UTAMA ---
 tab_reg, tab_manage = st.tabs(["📝 Registrasi & Daftar", "⚙️ Kelola Data"])
 
 with tab_reg:
+    # 1. Tabel Daftar (Nomor akan otomatis terurut 1, 2, 3...)
     st.subheader(f"📋 List Pengunjung ({view_option})")
     df_display = df[df['Tanggal'] == tgl_str] if view_option == "Hari Ini Saja" else df.copy()
 
@@ -115,6 +121,7 @@ with tab_reg:
 
     st.markdown("---")
     
+    # 2. Area Input (Anti-Enter & Wajib Klik Simpan)
     col_in, col_out = st.columns(2)
     
     with col_in:
@@ -128,14 +135,14 @@ with tab_reg:
             in_jml = st.number_input("Jumlah Tamu", min_value=1, step=1, value=1)
             in_jam = st.text_input("Jam Masuk (Contoh: 0800)")
             
-            # Tombol Simpan sebagai satu-satunya pemicu submit
             btn_simpan = st.form_submit_button("💾 SIMPAN DATA TAMU", type="primary")
             
             if btn_simpan:
                 if in_nama and in_ktp:
                     jam_final = format_jam(in_jam)
+                    # Menambahkan data baru tanpa mempedulikan index lama
                     new_row = {
-                        "No": len(df) + 1,
+                        "No": 0, # Akan direset oleh sync_data
                         "Tanggal": in_tgl.strftime("%d-%m-%Y"),
                         "Nama": in_nama, "No KTP": in_ktp, "Keperluan": in_perlu,
                         "Jumlah Tamu": int(in_jml), "Visitor Id": in_id,
@@ -143,10 +150,10 @@ with tab_reg:
                     }
                     df_upd = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                     sync_data(df_upd)
-                    st.success(f"Berhasil: {in_nama} tersimpan.")
+                    st.success(f"Berhasil menyimpan {in_nama}")
                     st.rerun()
                 else:
-                    st.error("Gagal: Nama dan KTP wajib diisi!")
+                    st.error("Nama dan KTP wajib diisi!")
 
     with col_out:
         st.subheader("🚪 Check-Out")
@@ -173,7 +180,7 @@ with tab_reg:
 # --- TAB 2: MANAJEMEN ---
 with tab_manage:
     st.subheader("🛠️ Manajemen Database")
-    search_edit = st.text_input("Cari Nama/KTP untuk Edit:")
+    search_edit = st.text_input("Cari Nama/KTP untuk Edit/Hapus:")
     if search_edit:
         df_edit = df[df['Nama'].str.contains(search_edit, case=False) | df['No KTP'].astype(str).str.contains(search_edit)]
         for index, row in df_edit.iterrows():
