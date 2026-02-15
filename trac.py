@@ -46,7 +46,6 @@ def fetch_data():
         if not data:
             return pd.DataFrame(columns=["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"])
         df = pd.DataFrame(data)
-        # Bersihkan baris yang benar-benar kosong
         df = df[df['Nama'] != ""]
         df = df.dropna(how='all')
         df['Tanggal_Filter'] = pd.to_datetime(df['Tanggal'], dayfirst=True, errors='coerce')
@@ -55,24 +54,19 @@ def fetch_data():
         return pd.DataFrame(columns=["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"])
 
 def sync_data(df_baru):
-    # 1. Buang kolom 'Tanggal_Filter' jika ada
     if 'Tanggal_Filter' in df_baru.columns:
         df_baru = df_baru.drop(columns=['Tanggal_Filter'])
     
-    # 2. Hapus baris kosong
     df_baru = df_baru[df_baru['Nama'] != ""]
     df_baru = df_baru.dropna(subset=['Nama'])
     
-    # 3. RESET TOTAL NOMOR URUT
-    # Mengabaikan index lama dan membuat urutan 1, 2, 3... berdasarkan jumlah data yang ada sekarang
+    # Reset Nomor Urut agar selalu mulai dari 1
     df_baru = df_baru.reset_index(drop=True)
     df_baru['No'] = range(1, len(df_baru) + 1)
     
-    # 4. Pastikan kolom 'No' ada di urutan pertama
     cols = ['No'] + [c for c in df_baru.columns if c != 'No']
     df_baru = df_baru[cols]
     
-    # 5. Kirim ke Google Sheets
     df_baru = df_baru.fillna("-")
     sheet.clear()
     sheet.update([df_baru.columns.values.tolist()] + df_baru.values.tolist())
@@ -95,7 +89,6 @@ st.markdown("---")
 
 # --- SIDEBAR ---
 st.sidebar.title("🔍 Fitur Pencarian")
-st.sidebar.subheader("Cek Riwayat KTP")
 search_ktp = st.sidebar.text_input("Input No KTP Pengunjung:")
 if search_ktp:
     history = df[df['No KTP'].astype(str) == search_ktp].copy()
@@ -119,7 +112,6 @@ with tab_reg:
     if df_display.empty:
         st.info("Tidak ada data kunjungan.")
     else:
-        # Menampilkan tabel dengan nomor urut yang sudah diperbaiki
         st.dataframe(
             df_display[["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"]], 
             use_container_width=True, 
@@ -141,17 +133,14 @@ with tab_reg:
             in_jml = st.number_input("Jumlah Tamu", min_value=1, value=1)
             in_jam = st.text_input("Jam Masuk (Contoh: 0800)")
             
-            btn_simpan = st.form_submit_button("💾 SIMPAN DATA TAMU", type="primary")
-            
-            if btn_simpan:
+            if st.form_submit_button("💾 SIMPAN DATA TAMU", type="primary"):
                 if in_nama and in_ktp:
-                    jam_final = format_jam(in_jam)
                     new_row = {
-                        "No": 0, # Placeholder, akan di-reset di sync_data
+                        "No": 0,
                         "Tanggal": in_tgl.strftime("%d-%m-%Y"),
                         "Nama": in_nama, "No KTP": in_ktp, "Keperluan": in_perlu,
                         "Jumlah Tamu": int(in_jml), "Visitor Id": in_id,
-                        "Jam Masuk": jam_final, "Jam Keluar": "-", "Status": "IN"
+                        "Jam Masuk": format_jam(in_jam), "Jam Keluar": "-", "Status": "IN"
                     }
                     df_upd = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                     sync_data(df_upd)
@@ -176,24 +165,49 @@ with tab_reg:
         else:
             st.info("Tidak ada tamu aktif.")
 
-# --- TAB 2: MANAJEMEN ---
+# --- TAB 2: MANAJEMEN (EDIT LENGKAP) ---
 with tab_manage:
-    st.subheader("🛠️ Manajemen Database")
-    search_edit = st.text_input("Cari Nama/KTP:")
+    st.subheader("🛠️ Manajemen & Koreksi Database")
+    search_edit = st.text_input("Cari Nama/KTP untuk koreksi data:")
+    
     if search_edit:
         df_edit = df[df['Nama'].str.contains(search_edit, case=False) | df['No KTP'].astype(str).str.contains(search_edit)]
+        
         for index, row in df_edit.iterrows():
-            with st.expander(f"Edit: {row['Nama']}"):
-                with st.form(f"form_edit_{index}"):
-                    en = st.text_input("Nama", value=row['Nama'])
-                    ek = st.text_input("KTP", value=str(row['No KTP']))
-                    if st.form_submit_button("SIMPAN PERUBAHAN"):
-                        df.at[index, 'Nama'] = en
-                        df.at[index, 'No KTP'] = ek
+            with st.expander(f"📝 Edit Data: {row['Nama']} (Baris {row['No']})"):
+                # Form edit mencakup semua kolom utama
+                with st.form(f"form_full_edit_{index}"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        edit_tgl = st.text_input("Tanggal", value=row['Tanggal'])
+                        edit_nama = st.text_input("Nama Lengkap", value=row['Nama'])
+                        edit_ktp = st.text_input("Nomor KTP", value=str(row['No KTP']))
+                        edit_id = st.text_input("Visitor ID", value=row['Visitor Id'])
+                    with col2:
+                        edit_perlu = st.text_input("Keperluan", value=row['Keperluan'])
+                        edit_jml = st.number_input("Jumlah Tamu", value=int(row['Jumlah Tamu']), min_value=1)
+                        edit_jam_in = st.text_input("Jam Masuk", value=row['Jam Masuk'])
+                        edit_jam_out = st.text_input("Jam Keluar", value=row['Jam Keluar'])
+                    
+                    edit_status = st.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1)
+                    
+                    if st.form_submit_button("💾 PERBARUI DATA"):
+                        df.at[index, 'Tanggal'] = edit_tgl
+                        df.at[index, 'Nama'] = edit_nama
+                        df.at[index, 'No KTP'] = edit_ktp
+                        df.at[index, 'Keperluan'] = edit_perlu
+                        df.at[index, 'Visitor Id'] = edit_id
+                        df.at[index, 'Jumlah Tamu'] = edit_jml
+                        df.at[index, 'Jam Masuk'] = edit_jam_in
+                        df.at[index, 'Jam Keluar'] = edit_jam_out
+                        df.at[index, 'Status'] = edit_status
+                        
                         sync_data(df)
+                        st.success(f"Data {edit_nama} berhasil diperbarui!")
                         st.rerun()
-                if st.button("🗑️ Hapus Data", key=f"del_{index}"):
-                    # Menghapus secara fisik dari dataframe
+                
+                # Tombol hapus diletakkan di luar form agar instan
+                if st.button(f"🗑️ Hapus Baris {row['No']}", key=f"del_btn_{index}", type="secondary"):
                     df = df.drop(index)
                     sync_data(df)
                     st.rerun()
