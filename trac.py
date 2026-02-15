@@ -60,7 +60,7 @@ def sync_data(df_baru):
     sheet.clear()
     sheet.update([df_baru.columns.values.tolist()] + df_baru.values.tolist())
 
-# Load data awal
+# Load data
 df = fetch_data()
 waktu_skrg = get_waktu_wib()
 tgl_str = waktu_skrg.strftime("%d-%m-%Y")
@@ -77,7 +77,7 @@ with col_text:
 
 st.markdown("---")
 
-# --- SIDEBAR (CEK RIWAYAT KTP & KEPERLUAN) ---
+# --- SIDEBAR (CEK RIWAYAT KTP) ---
 st.sidebar.title("🔍 Fitur Pencarian")
 st.sidebar.subheader("Cek Riwayat KTP")
 search_ktp = st.sidebar.text_input("Input No KTP Pengunjung:")
@@ -87,7 +87,7 @@ if search_ktp:
         nama_tamu = history['Nama'].iloc[-1]
         st.sidebar.success(f"**Nama:** {nama_tamu}")
         st.sidebar.info(f"📋 Total Kunjungan: **{len(history)} kali**")
-        st.sidebar.write("**Daftar Keperluan:**")
+        st.sidebar.write("**Daftar Keperluan Sebelumnya:**")
         history_summary = history[['Tanggal', 'Keperluan']].sort_index(ascending=False)
         st.sidebar.dataframe(history_summary, hide_index=True, use_container_width=True)
     else:
@@ -96,11 +96,11 @@ if search_ktp:
 st.sidebar.markdown("---")
 view_option = st.sidebar.selectbox("Lihat Daftar Utama:", ["Hari Ini Saja", "Semua Riwayat"])
 
-# --- UI UTAMA DENGAN TAB ---
+# --- UI UTAMA ---
 tab_reg, tab_manage = st.tabs(["📝 Registrasi & Daftar", "⚙️ Kelola Data"])
 
 with tab_reg:
-    # 1. TABEL DAFTAR PENGUNJUNG
+    # 1. Daftar Pengunjung
     st.subheader(f"📋 List Pengunjung ({view_option})")
     df_display = df[df['Tanggal'] == tgl_str] if view_option == "Hari Ini Saja" else df.copy()
 
@@ -115,12 +115,11 @@ with tab_reg:
 
     st.markdown("---")
     
-    # 2. AREA INPUT CHECK-IN & CHECK-OUT
+    # 2. Area Input (Double Validation Logic)
     col_in, col_out = st.columns(2)
     
     with col_in:
         st.subheader("➕ Check-In")
-        # Menggunakan st.form untuk mengelompokkan input
         with st.form("form_registrasi", clear_on_submit=True):
             in_tgl = st.date_input("Tanggal", waktu_skrg)
             in_nama = st.text_input("Nama Lengkap")
@@ -130,10 +129,11 @@ with tab_reg:
             in_jml = st.number_input("Jumlah Tamu", min_value=1, step=1, value=1)
             in_jam = st.text_input("Jam Masuk (Contoh: 0800)")
             
-            # Eksekusi hanya terjadi saat tombol ini ditekan
-            submit_checkin = st.form_submit_button("💾 SIMPAN DATA TAMU", type="primary")
+            # Kunci utama: form_submit_button
+            btn_simpan = st.form_submit_button("💾 SIMPAN DATA TAMU", type="primary")
             
-            if submit_checkin:
+            # Logika eksekusi HANYA jika tombol ditekan secara eksplisit
+            if btn_simpan:
                 if in_nama and in_ktp:
                     jam_final = format_jam(in_jam)
                     new_row = {
@@ -145,10 +145,10 @@ with tab_reg:
                     }
                     df_upd = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                     sync_data(df_upd)
-                    st.success(f"Data {in_nama} berhasil masuk.")
+                    st.success(f"Berhasil: {in_nama} tersimpan.")
                     st.rerun()
                 else:
-                    st.warning("⚠️ Mohon isi Nama dan KTP terlebih dahulu.")
+                    st.error("Gagal: Nama dan KTP wajib diisi!")
 
     with col_out:
         st.subheader("🚪 Check-Out")
@@ -158,10 +158,9 @@ with tab_reg:
                 t_out = st.selectbox("Pilih Nama", list_aktif)
                 j_out = st.text_input("Jam Keluar (Contoh: 1700)")
                 
-                # Eksekusi hanya terjadi saat tombol ini ditekan
-                submit_checkout = st.form_submit_button("🚪 KONFIRMASI KELUAR")
+                btn_checkout = st.form_submit_button("🚪 KONFIRMASI KELUAR")
                 
-                if submit_checkout:
+                if btn_checkout:
                     if t_out and j_out:
                         jam_out_final = format_jam(j_out)
                         idx = df[df['Nama'] == t_out].index[-1]
@@ -173,14 +172,14 @@ with tab_reg:
         else:
             st.info("Tidak ada tamu aktif.")
 
-# --- TAB 2: EDIT & HAPUS ---
+# --- TAB 2: MANAJEMEN ---
 with tab_manage:
     st.subheader("🛠️ Manajemen Database")
-    search_edit = st.text_input("Cari Nama/KTP:")
+    search_edit = st.text_input("Cari Nama/KTP untuk Edit:")
     if search_edit:
         df_edit = df[df['Nama'].str.contains(search_edit, case=False) | df['No KTP'].astype(str).str.contains(search_edit)]
         for index, row in df_edit.iterrows():
-            with st.expander(f"Edit: {row['Nama']} ({row['Tanggal']})"):
+            with st.expander(f"Edit: {row['Nama']}"):
                 with st.form(f"form_edit_{index}"):
                     en = st.text_input("Nama", value=row['Nama'])
                     ek = st.text_input("KTP", value=str(row['No KTP']))
@@ -194,7 +193,8 @@ with tab_manage:
                         df.at[index, 'Status'] = es
                         sync_data(df)
                         st.rerun()
-                if st.button("🗑️ Hapus Baris", key=f"del_{index}"):
+                
+                if st.button("🗑️ Hapus Data", key=f"del_{index}"):
                     df = df.drop(index).reset_index(drop=True)
                     sync_data(df)
                     st.rerun()
