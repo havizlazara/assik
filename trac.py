@@ -42,10 +42,13 @@ sheet = init_connection()
 # --- FUNGSI DATA ---
 def fetch_data():
     try:
+        # Mengambil seluruh baris yang ada isinya saja dari Google Sheets
         data = sheet.get_all_records()
         if not data:
             return pd.DataFrame(columns=["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"])
         df = pd.DataFrame(data)
+        # Menghapus baris yang benar-benar kosong jika ada
+        df = df.dropna(how='all')
         df['Tanggal_Filter'] = pd.to_datetime(df['Tanggal'], dayfirst=True, errors='coerce')
         return df
     except:
@@ -54,9 +57,11 @@ def fetch_data():
 def sync_data(df_baru):
     if 'Tanggal_Filter' in df_baru.columns:
         df_baru = df_baru.drop(columns=['Tanggal_Filter'])
-    # Mengurutkan ulang kolom "No" secara otomatis
+    # Re-indexing nomor agar urut sesuai jumlah baris
     df_baru['No'] = range(1, len(df_baru) + 1)
     df_baru = df_baru.fillna("-")
+    
+    # Menghapus seluruh isi sheet dan menggantinya dengan data baru yang pas jumlah barisnya
     sheet.clear()
     sheet.update([df_baru.columns.values.tolist()] + df_baru.values.tolist())
 
@@ -73,51 +78,41 @@ with col_logo:
 
 with col_text:
     st.title("Visitor Management - GRHA TRAC")
-    st.markdown(f"**📅 Tanggal:** {waktu_skrg.strftime('%A, %d %B %Y')}")
+    st.markdown(f"**📅 Tanggal Operasional:** {waktu_skrg.strftime('%A, %d %B %Y')}")
 
 st.markdown("---")
 
 # --- SIDEBAR ---
-st.sidebar.title("📊 Rekap Data")
-view_option = st.sidebar.radio("Tampilkan Data:", ["Hari Ini Saja", "Semua Riwayat"])
+st.sidebar.title("📊 Filter Tampilan")
+view_option = st.sidebar.selectbox("Pilih Data Tampilan:", ["Hari Ini Saja", "Semua Riwayat"])
 
-filter_tgl = st.sidebar.date_input("Cek Total Tamu per Tanggal", waktu_skrg)
+st.sidebar.markdown("---")
+filter_tgl = st.sidebar.date_input("Total Tamu per Tanggal", waktu_skrg)
 if not df.empty:
     df_rekap = df[df['Tanggal_Filter'].dt.date == filter_tgl]
     total_tamu_tgl = df_rekap['Jumlah Tamu'].apply(lambda x: int(x) if str(x).isdigit() else 0).sum()
-    st.sidebar.metric(f"Total Tamu ({filter_tgl.strftime('%d/%m')})", f"{total_tamu_tgl} Orang")
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔍 Cek Riwayat KTP")
-search_ktp = st.sidebar.text_input("Input No KTP:")
-if search_ktp:
-    history = df[df['No KTP'].astype(str) == search_ktp]
-    if not history.empty:
-        st.sidebar.success(f"**Nama:** {history['Nama'].iloc[-1]}")
-        st.sidebar.write(f"Kunjungan: {len(history)} kali")
+    st.sidebar.metric(f"Total Tamu", f"{total_tamu_tgl} Orang")
 
 # --- UI UTAMA DENGAN TAB ---
 tab_reg, tab_manage = st.tabs(["📝 Registrasi & Daftar", "⚙️ Kelola Data (Edit/Hapus)"])
 
-# --- TAB 1: DAFTAR & INPUT ---
 with tab_reg:
-    st.subheader("📋 Daftar Pengunjung")
+    st.subheader(f"📋 Daftar Pengunjung ({view_option})")
     
-    # Logika Filter Tampilan
+    # Filter Data
     if view_option == "Hari Ini Saja":
         df_display = df[df['Tanggal'] == tgl_str]
     else:
         df_display = df.copy()
 
     if df_display.empty:
-        st.info("Tidak ada data untuk ditampilkan.")
+        st.info("Tidak ada data tamu.")
     else:
-        # Menggunakan height=400 agar tabel memiliki scrollbar internal jika data banyak
+        # Menghapus 'height' agar baris menyesuaikan otomatis dengan jumlah data
         st.dataframe(
             df_display[["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"]], 
             use_container_width=True, 
-            hide_index=True,
-            height=400 
+            hide_index=True
         )
 
     st.markdown("---")
@@ -166,28 +161,27 @@ with tab_reg:
 # --- TAB 2: EDIT & HAPUS ---
 with tab_manage:
     st.subheader("🛠️ Manajemen Database")
-    search_edit = st.text_input("Cari Nama/KTP untuk Edit atau Hapus:")
+    search_edit = st.text_input("Cari Nama/KTP:")
     
     if search_edit:
         df_edit = df[df['Nama'].str.contains(search_edit, case=False) | df['No KTP'].astype(str).str.contains(search_edit)]
-        if not df_edit.empty:
-            for index, row in df_edit.iterrows():
-                with st.expander(f"Edit: {row['Nama']} ({row['Tanggal']})"):
-                    c1, c2 = st.columns(2)
-                    en = c1.text_input("Nama", value=row['Nama'], key=f"nm_{index}")
-                    ek = c1.text_input("KTP", value=row['No KTP'], key=f"ktp_{index}")
-                    ep = c2.text_input("Keperluan", value=row['Keperluan'], key=f"prl_{index}")
-                    es = c2.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1, key=f"st_{index}")
-                    
-                    if st.button("💾 Simpan Perubahan", key=f"save_{index}"):
-                        df.at[index, 'Nama'] = en
-                        df.at[index, 'No KTP'] = ek
-                        df.at[index, 'Keperluan'] = ep
-                        df.at[index, 'Status'] = es
-                        sync_data(df)
-                        st.rerun()
-                    
-                    if st.button("🗑️ Hapus Data", key=f"del_{index}"):
-                        df = df.drop(index).reset_index(drop=True)
-                        sync_data(df)
-                        st.rerun()
+        for index, row in df_edit.iterrows():
+            with st.expander(f"Edit: {row['Nama']} ({row['Tanggal']})"):
+                c1, c2 = st.columns(2)
+                en = c1.text_input("Nama", value=row['Nama'], key=f"nm_{index}")
+                ek = c1.text_input("KTP", value=str(row['No KTP']), key=f"ktp_{index}")
+                ep = c2.text_input("Keperluan", value=row['Keperluan'], key=f"prl_{index}")
+                es = c2.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1, key=f"st_{index}")
+                
+                if st.button("💾 Simpan Perubahan", key=f"save_{index}"):
+                    df.at[index, 'Nama'] = en
+                    df.at[index, 'No KTP'] = ek
+                    df.at[index, 'Keperluan'] = ep
+                    df.at[index, 'Status'] = es
+                    sync_data(df)
+                    st.rerun()
+                
+                if st.button("🗑️ Hapus Data", key=f"del_{index}"):
+                    df = df.drop(index).reset_index(drop=True)
+                    sync_data(df)
+                    st.rerun()
