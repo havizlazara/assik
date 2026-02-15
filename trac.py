@@ -12,14 +12,15 @@ st.set_page_config(page_title="Visitor Management TRAC", layout="wide")
 def get_waktu_wib():
     return datetime.utcnow() + timedelta(hours=7)
 
-# Fungsi Format Jam Otomatis (HHMM -> HH.MM)
+# Fungsi Format Jam Otomatis (HHMM -> HH:00)
 def format_jam(input_jam):
     if not input_jam or input_jam == "-": return "-"
+    # Ambil hanya angka saja
     digits = "".join(filter(str.isdigit, str(input_jam)))
     if len(digits) == 4:
-        return f"{digits[:2]}.{digits[2:]}"
+        return f"{digits[:2]}:{digits[2:]}"
     elif len(digits) == 3:
-        return f"0{digits[0]}.{digits[1:]}"
+        return f"0{digits[0]}:{digits[1:]}"
     return input_jam
 
 # --- KONEKSI GOOGLE SHEETS ---
@@ -60,7 +61,7 @@ def sync_data(df_baru):
     sheet.clear()
     sheet.update([df_baru.columns.values.tolist()] + df_baru.values.tolist())
 
-# Load data
+# Load data awal
 df = fetch_data()
 waktu_skrg = get_waktu_wib()
 tgl_str = waktu_skrg.strftime("%d-%m-%Y")
@@ -96,11 +97,10 @@ if search_ktp:
 st.sidebar.markdown("---")
 view_option = st.sidebar.selectbox("Lihat Daftar Utama:", ["Hari Ini Saja", "Semua Riwayat"])
 
-# --- UI UTAMA ---
+# --- UI UTAMA DENGAN TAB ---
 tab_reg, tab_manage = st.tabs(["📝 Registrasi & Daftar", "⚙️ Kelola Data"])
 
 with tab_reg:
-    # 1. Daftar Pengunjung
     st.subheader(f"📋 List Pengunjung ({view_option})")
     df_display = df[df['Tanggal'] == tgl_str] if view_option == "Hari Ini Saja" else df.copy()
 
@@ -115,7 +115,6 @@ with tab_reg:
 
     st.markdown("---")
     
-    # 2. Area Input (Double Validation Logic)
     col_in, col_out = st.columns(2)
     
     with col_in:
@@ -129,10 +128,9 @@ with tab_reg:
             in_jml = st.number_input("Jumlah Tamu", min_value=1, step=1, value=1)
             in_jam = st.text_input("Jam Masuk (Contoh: 0800)")
             
-            # Kunci utama: form_submit_button
+            # Tombol Simpan sebagai satu-satunya pemicu submit
             btn_simpan = st.form_submit_button("💾 SIMPAN DATA TAMU", type="primary")
             
-            # Logika eksekusi HANYA jika tombol ditekan secara eksplisit
             if btn_simpan:
                 if in_nama and in_ktp:
                     jam_final = format_jam(in_jam)
