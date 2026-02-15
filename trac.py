@@ -15,7 +15,6 @@ def get_waktu_wib():
 # Fungsi Format Jam Otomatis (HHMM -> HH.MM)
 def format_jam(input_jam):
     if not input_jam or input_jam == "-": return "-"
-    # Ambil hanya angka
     digits = "".join(filter(str.isdigit, str(input_jam)))
     if len(digits) == 4:
         return f"{digits[:2]}.{digits[2:]}"
@@ -60,9 +59,25 @@ df = fetch_data()
 waktu_skrg = get_waktu_wib()
 tgl_str = waktu_skrg.strftime("%d-%m-%Y")
 
+# --- HEADER DENGAN LOGO ---
+col_logo, col_text = st.columns([1, 5])
+
+with col_logo:
+    # Memeriksa apakah file logo tersedia
+    if os.path.exists("trac.png"):
+        st.image("trac.png", width=150)
+    else:
+        st.warning("Logo trac.png tidak ditemukan")
+
+with col_text:
+    st.title("Visitor Management - GRHA TRAC")
+    st.markdown(f"**📅 Tanggal Operasional:** {waktu_skrg.strftime('%A, %d %B %Y')}")
+
+st.markdown("---")
+
 # --- SIDEBAR: PENCARIAN RIWAYAT KTP ---
 st.sidebar.title("🔍 Pencarian Riwayat")
-search_ktp = st.sidebar.text_input("Cek Riwayat No KTP:")
+search_ktp = st.sidebar.text_input("Cari No KTP:")
 
 if search_ktp:
     history = df[df['No KTP'].astype(str) == search_ktp]
@@ -75,12 +90,9 @@ if search_ktp:
         st.sidebar.warning("KTP belum pernah terdaftar.")
 
 # --- UI UTAMA ---
-st.title("🏛️ Visitor Management - GRHA TRAC")
-st.markdown(f"**📅 Tanggal Operasional:** {waktu_skrg.strftime('%A, %d %B %Y')}")
 
 # TABEL DAFTAR TAMU (DI ATAS)
 st.subheader("📋 Daftar Pengunjung Terdaftar")
-# Filter untuk melihat tamu hari ini saja agar tabel tetap rapi
 df_display = df[df['Tanggal'] == tgl_str]
 if df_display.empty:
     st.info("Belum ada pengunjung yang terdaftar hari ini.")
@@ -135,10 +147,10 @@ with col_out:
     else:
         st.info("Tidak ada tamu yang berstatus IN.")
 
-# TAB MANAJEMEN (OPSIONAL)
+# TAB MANAJEMEN
 st.markdown("---")
 with st.expander("⚙️ Kelola Database (Edit / Hapus)"):
-    search_edit = st.text_input("Cari Nama untuk Edit:")
+    search_edit = st.text_input("Cari Nama untuk Hapus:")
     if search_edit:
         df_edit = df[df['Nama'].str.contains(search_edit, case=False)]
         for index, row in df_edit.iterrows():
