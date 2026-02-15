@@ -54,7 +54,7 @@ def fetch_data():
 def sync_data(df_baru):
     if 'Tanggal_Filter' in df_baru.columns:
         df_baru = df_baru.drop(columns=['Tanggal_Filter'])
-    # Mengurutkan ulang kolom "No" agar selalu berurutan 1, 2, 3...
+    # Mengurutkan ulang kolom "No" secara otomatis
     df_baru['No'] = range(1, len(df_baru) + 1)
     df_baru = df_baru.fillna("-")
     sheet.clear()
@@ -73,13 +73,15 @@ with col_logo:
 
 with col_text:
     st.title("Visitor Management - GRHA TRAC")
-    st.markdown(f"**📅 Tanggal Operasional:** {waktu_skrg.strftime('%A, %d %B %Y')}")
+    st.markdown(f"**📅 Tanggal:** {waktu_skrg.strftime('%A, %d %B %Y')}")
 
 st.markdown("---")
 
-# --- SIDEBAR: REKAP & RIWAYAT ---
-st.sidebar.title("📊 Rekap & Riwayat")
-filter_tgl = st.sidebar.date_input("Total Tamu per Tanggal", waktu_skrg)
+# --- SIDEBAR ---
+st.sidebar.title("📊 Rekap Data")
+view_option = st.sidebar.radio("Tampilkan Data:", ["Hari Ini Saja", "Semua Riwayat"])
+
+filter_tgl = st.sidebar.date_input("Cek Total Tamu per Tanggal", waktu_skrg)
 if not df.empty:
     df_rekap = df[df['Tanggal_Filter'].dt.date == filter_tgl]
     total_tamu_tgl = df_rekap['Jumlah Tamu'].apply(lambda x: int(x) if str(x).isdigit() else 0).sum()
@@ -92,22 +94,31 @@ if search_ktp:
     history = df[df['No KTP'].astype(str) == search_ktp]
     if not history.empty:
         st.sidebar.success(f"**Nama:** {history['Nama'].iloc[-1]}")
-        st.sidebar.write(f"Total Kunjungan: {len(history)} kali")
-    else:
-        st.sidebar.warning("KTP tidak ditemukan.")
+        st.sidebar.write(f"Kunjungan: {len(history)} kali")
 
 # --- UI UTAMA DENGAN TAB ---
 tab_reg, tab_manage = st.tabs(["📝 Registrasi & Daftar", "⚙️ Kelola Data (Edit/Hapus)"])
 
 # --- TAB 1: DAFTAR & INPUT ---
 with tab_reg:
-    st.subheader("📋 Daftar Pengunjung Hari Ini")
-    df_display = df[df['Tanggal'] == tgl_str]
-    if df_display.empty:
-        st.info("Belum ada tamu hari ini.")
+    st.subheader("📋 Daftar Pengunjung")
+    
+    # Logika Filter Tampilan
+    if view_option == "Hari Ini Saja":
+        df_display = df[df['Tanggal'] == tgl_str]
     else:
-        cols_view = ["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"]
-        st.dataframe(df_display[cols_view], use_container_width=True, hide_index=True)
+        df_display = df.copy()
+
+    if df_display.empty:
+        st.info("Tidak ada data untuk ditampilkan.")
+    else:
+        # Menggunakan height=400 agar tabel memiliki scrollbar internal jika data banyak
+        st.dataframe(
+            df_display[["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"]], 
+            use_container_width=True, 
+            hide_index=True,
+            height=400 
+        )
 
     st.markdown("---")
     
@@ -121,7 +132,7 @@ with tab_reg:
             in_perlu = st.text_input("Keperluan")
             in_id = st.text_input("Visitor ID")
             in_jml = st.number_input("Jumlah Tamu", min_value=1, step=1, value=1)
-            in_jam = st.text_input("Jam Masuk (HHMM, contoh: 0800)")
+            in_jam = st.text_input("Jam Masuk (HHMM)")
             
             if st.form_submit_button("Simpan", type="primary"):
                 if in_nama and in_ktp:
@@ -142,7 +153,7 @@ with tab_reg:
         if list_aktif:
             with st.form("form_checkout", clear_on_submit=True):
                 t_out = st.selectbox("Pilih Nama", list_aktif)
-                j_out = st.text_input("Jam Keluar (HHMM, contoh: 1700)")
+                j_out = st.text_input("Jam Keluar (HHMM)")
                 if st.form_submit_button("Konfirmasi Out"):
                     idx = df[df['Nama'] == t_out].index[-1]
                     df.at[idx, 'Jam Keluar'] = format_jam(j_out)
@@ -163,27 +174,20 @@ with tab_manage:
             for index, row in df_edit.iterrows():
                 with st.expander(f"Edit: {row['Nama']} ({row['Tanggal']})"):
                     c1, c2 = st.columns(2)
-                    edit_nama = c1.text_input("Nama", value=row['Nama'], key=f"nm_{index}")
-                    edit_ktp = c1.text_input("KTP", value=row['No KTP'], key=f"ktp_{index}")
-                    edit_perlu = c2.text_input("Keperluan", value=row['Keperluan'], key=f"prl_{index}")
-                    edit_status = c2.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1, key=f"st_{index}")
+                    en = c1.text_input("Nama", value=row['Nama'], key=f"nm_{index}")
+                    ek = c1.text_input("KTP", value=row['No KTP'], key=f"ktp_{index}")
+                    ep = c2.text_input("Keperluan", value=row['Keperluan'], key=f"prl_{index}")
+                    es = c2.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1, key=f"st_{index}")
                     
-                    col_btn1, col_btn2 = st.columns(2)
-                    if col_btn1.button("💾 Simpan Perubahan", key=f"save_{index}"):
-                        df.at[index, 'Nama'] = edit_nama
-                        df.at[index, 'No KTP'] = edit_ktp
-                        df.at[index, 'Keperluan'] = edit_perlu
-                        df.at[index, 'Status'] = edit_status
+                    if st.button("💾 Simpan Perubahan", key=f"save_{index}"):
+                        df.at[index, 'Nama'] = en
+                        df.at[index, 'No KTP'] = ek
+                        df.at[index, 'Keperluan'] = ep
+                        df.at[index, 'Status'] = es
                         sync_data(df)
-                        st.success("Data diperbarui!")
                         st.rerun()
                     
-                    if col_btn2.button("🗑️ Hapus Data", key=f"del_{index}"):
+                    if st.button("🗑️ Hapus Data", key=f"del_{index}"):
                         df = df.drop(index).reset_index(drop=True)
                         sync_data(df)
-                        st.warning("Data dihapus!")
                         st.rerun()
-        else:
-            st.warning("Data tidak ditemukan.")
-    else:
-        st.info("Ketik nama tamu di atas untuk mengedit atau menghapus data.")
