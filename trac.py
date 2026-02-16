@@ -40,7 +40,7 @@ def init_connection():
 
 sheet = init_connection()
 
-# --- FUNGSI DATA & RESET NOMOR ---
+# --- FUNGSI DATA & SYNC ---
 def fetch_data():
     try:
         data = sheet.get_all_records()
@@ -49,18 +49,19 @@ def fetch_data():
         df = pd.DataFrame(data)
         df = df[df['Nama'] != ""]
         df = df.dropna(how='all')
-        df['Tanggal_Filter'] = pd.to_datetime(df['Tanggal'], dayfirst=True, errors='coerce')
         return df
     except:
         return pd.DataFrame(columns=["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"])
 
 def sync_data(df_baru):
-    if 'Tanggal_Filter' in df_baru.columns:
-        df_baru = df_baru.drop(columns=['Tanggal_Filter'])
+    # Membersihkan data dan mereset nomor urut database (Google Sheets)
     df_baru = df_baru[df_baru['Nama'] != ""].reset_index(drop=True)
     df_baru['No'] = range(1, len(df_baru) + 1)
-    cols = ['No'] + [c for c in df_baru.columns if c != 'No']
+    
+    # Pastikan urutan kolom sesuai
+    cols = ['No', 'Tanggal', 'Nama', 'No KTP', 'Keperluan', 'Jumlah Tamu', 'Visitor Id', 'Jam Masuk', 'Jam Keluar', 'Status']
     df_baru = df_baru[cols].fillna("-")
+    
     sheet.clear()
     sheet.update([df_baru.columns.values.tolist()] + df_baru.values.tolist())
 
@@ -69,95 +70,79 @@ df = fetch_data()
 waktu_wib = get_waktu_wib()
 tgl_skrg = waktu_wib.strftime("%d-%m-%Y")
 
-# --- HEADER ---
-col_logo, col_text = st.columns([1, 5])
-with col_logo:
-    if os.path.exists("trac.png"):
-        st.image("trac.png", width=150)
-with col_text:
-    st.title("Visitor Management - GRHA TRAC")
-    st.subheader(f"🕒 {waktu_wib.strftime('%H:%M')} WIB")
-
-st.markdown("---")
-
 # --- SIDEBAR: PENCARIAN & DOWNLOAD ---
 st.sidebar.title("📊 Menu Utama")
-
-# 1. Pencarian Riwayat KTP
 st.sidebar.subheader("Cek Riwayat KTP")
 search_ktp = st.sidebar.text_input("Cari No KTP:")
 if search_ktp:
     history = df[df['No KTP'].astype(str) == search_ktp].copy()
     if not history.empty:
         st.sidebar.success(f"Nama: {history['Nama'].iloc[-1]}")
-        st.sidebar.info(f"Total Kunjungan: {len(history)} kali")
+        st.sidebar.info(f"Kunjungan: {len(history)} kali")
         st.sidebar.dataframe(history[['Tanggal', 'Keperluan']].sort_index(ascending=False), hide_index=True)
     else:
         st.sidebar.warning("KTP belum terdaftar.")
 
 st.sidebar.markdown("---")
-
-# 2. Filter Tabel Utama
-st.sidebar.subheader("Filter & Ekspor")
 view_opt = st.sidebar.selectbox("Filter Tampilan:", ["Hari Ini Saja", "Semua Riwayat"])
 
-# --- PROSES DATA DOWNLOAD ---
-# Data yang akan didownload menyesuaikan dengan filter view_opt
-df_download = df[df['Tanggal'] == tgl_skrg].copy() if view_opt == "Hari Ini Saja" else df.copy()
-df_download = df_download.drop(columns=['Tanggal_Filter'], errors='ignore')
+# Logika Filter Data Tampilan
+if view_opt == "Hari Ini Saja":
+    df_filtered = df[df['Tanggal'] == tgl_skrg].copy()
+else:
+    df_filtered = df.copy()
 
-# Tombol Download Excel
-if not df_download.empty:
-    # Buffer untuk Excel
+# RESET NOMOR URUT VISUAL (Agar selalu mulai dari 1 di tabel)
+if not df_filtered.empty:
+    df_filtered['No'] = range(1, len(df_filtered) + 1)
+
+# Tombol Download Excel di Sidebar
+if not df_filtered.empty:
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-        df_download.to_excel(writer, index=False, sheet_name='Data_Pengunjung')
-        
+        df_filtered.to_excel(writer, index=False, sheet_name='Data_Visitor')
     st.sidebar.download_button(
         label=f"📥 Download Excel ({view_opt})",
         data=buffer.getvalue(),
-        file_name=f"Visitor_TRAC_{view_opt.replace(' ', '_')}_{tgl_skrg}.xlsx",
+        file_name=f"Visitor_TRAC_{tgl_skrg}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-else:
-    st.sidebar.info("Tidak ada data untuk didownload.")
 
 # --- UI UTAMA DENGAN TAB ---
 tab_reg, tab_manage = st.tabs(["📝 Registrasi & Daftar", "⚙️ Kelola Data"])
 
-# TAB 1: REGISTRASI & DAFTAR
 with tab_reg:
-    st.subheader(f"📋 Tabel Pengunjung ({view_opt})")
-    if df_download.empty:
-        st.info("Belum ada data kunjungan.")
+    st.title("🏛️ GRHA TRAC")
+    st.subheader(f"🕒 {waktu_wib.strftime('%H:%M')} WIB | 📅 {waktu_wib.strftime('%d %B %Y')}")
+    
+    # Menampilkan tabel hasil filter dengan nomor urut yang sudah di-reset
+    if df_filtered.empty:
+        st.info(f"Belum ada data kunjungan untuk filter: {view_opt}")
     else:
-        st.dataframe(df_download, use_container_width=True, hide_index=True)
+        st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 
     st.markdown("---")
-    
     col_in, col_out = st.columns(2)
     
     with col_in:
         st.subheader("➕ Check-In")
         with st.form("form_checkin", clear_on_submit=True):
-            in_tgl = st.date_input("Tanggal", waktu_wib)
             in_nama = st.text_input("Nama Lengkap")
             in_ktp = st.text_input("No KTP")
             in_perlu = st.text_input("Keperluan")
             in_id = st.text_input("Visitor ID")
             in_jml = st.number_input("Jumlah Tamu", min_value=1, value=1)
-            in_jam = st.text_input("Jam Masuk (Contoh: 0800)")
+            in_jam = st.text_input("Jam Masuk (Contoh: 0830)")
             
             if st.form_submit_button("💾 SIMPAN DATA", type="primary"):
                 if in_nama and in_ktp:
-                    new_data = {
-                        "No": 0, "Tanggal": in_tgl.strftime("%d-%m-%Y"), "Nama": in_nama,
-                        "No KTP": in_ktp, "Keperluan": in_perlu, "Jumlah Tamu": int(in_jml),
+                    new_row = {
+                        "No": 0, "Tanggal": tgl_skrg, "Nama": in_nama, "No KTP": in_ktp,
+                        "Keperluan": in_perlu, "Jumlah Tamu": int(in_jml),
                         "Visitor Id": in_id, "Jam Masuk": format_jam(in_jam),
                         "Jam Keluar": "-", "Status": "IN"
                     }
-                    df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
-                    sync_data(df)
+                    sync_data(pd.concat([df, pd.DataFrame([new_row])], ignore_index=True))
                     st.rerun()
                 else:
                     st.error("Nama & KTP wajib diisi!")
@@ -178,10 +163,9 @@ with tab_reg:
         else:
             st.info("Tidak ada tamu aktif.")
 
-# TAB 2: EDIT & HAPUS
 with tab_manage:
     st.subheader("🛠️ Manajemen Database")
-    q = st.text_input("Cari data:")
+    q = st.text_input("Cari data (Nama/KTP):")
     if q:
         df_edit = df[df['Nama'].str.contains(q, case=False) | df['No KTP'].astype(str).str.contains(q)]
         for idx, row in df_edit.iterrows():
@@ -204,7 +188,6 @@ with tab_manage:
                         sync_data(df)
                         st.rerun()
                 
-                if st.button(f"🗑️ HAPUS DATA {idx}", key=f"del_{idx}"):
-                    df = df.drop(idx)
-                    sync_data(df)
+                if st.button(f"🗑️ HAPUS DATA", key=f"del_{idx}"):
+                    sync_data(df.drop(idx))
                     st.rerun()
