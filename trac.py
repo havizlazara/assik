@@ -16,7 +16,7 @@ def get_waktu_wib():
 waktu_wib = get_waktu_wib()
 tgl_skrg = waktu_wib.strftime("%d-%m-%Y")
 
-# --- 3. FUNGSI FORMAT JAM (HHMM -> HH:MM) ---
+# --- 3. FUNGSI FORMAT JAM ---
 def format_jam(input_jam):
     if not input_jam or input_jam == "-": return "-"
     digits = "".join(filter(str.isdigit, str(input_jam)))
@@ -78,16 +78,12 @@ st.markdown("---")
 
 # --- 7. SIDEBAR (PENCARIAN & RIWAYAT) ---
 st.sidebar.title("🔍 Menu & Pencarian")
-
-# Fitur Pencarian KTP dimunculkan kembali
 search_ktp = st.sidebar.text_input("Cari No KTP untuk Riwayat:")
 if search_ktp:
     history = df[df['No KTP'].astype(str) == search_ktp].copy()
     if not history.empty:
         st.sidebar.success(f"Nama: {history['Nama'].iloc[-1]}")
         st.sidebar.info(f"Total Kunjungan: {len(history)} kali")
-        # Menampilkan riwayat tanggal dan keperluan
-        st.sidebar.write("**Detail Kunjungan:**")
         st.sidebar.dataframe(history[['Tanggal', 'Keperluan', 'Status']].sort_index(ascending=False), hide_index=True)
     else:
         st.sidebar.warning("Data KTP tidak ditemukan.")
@@ -100,21 +96,8 @@ if view_opt == "Hari Ini Saja":
 else:
     df_filtered = df.copy()
 
-# Reset nomor urut visual di tabel
 if not df_filtered.empty:
     df_filtered['No'] = range(1, len(df_filtered) + 1)
-
-# Tombol Download Excel
-if not df_filtered.empty:
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-        df_filtered.to_excel(writer, index=False, sheet_name='Data_Visitor')
-    st.sidebar.download_button(
-        label=f"📥 Download Excel ({view_opt})",
-        data=buffer.getvalue(),
-        file_name=f"Visitor_TRAC_{tgl_skrg}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
 
 # --- 8. UI UTAMA ---
 tab_reg, tab_manage = st.tabs(["📝 Registrasi & Daftar", "⚙️ Kelola Data"])
@@ -128,78 +111,67 @@ with tab_reg:
     
     with col_in:
         st.subheader("➕ Check-In")
-        with st.form("form_registrasi", clear_on_submit=True):
-            in_nama = st.text_input("Nama Lengkap")
-            in_ktp = st.text_input("No KTP")
-            in_perlu = st.text_input("Keperluan")
-            in_id = st.text_input("Visitor ID")
-            in_jml = st.number_input("Jumlah Tamu", min_value=1, value=1)
-            in_jam = st.text_input("Jam Masuk (Contoh: 0800)")
-            
-            # Form Submit Button: Enter di dalam field tidak akan langsung save 
-            # jika field wajib belum lengkap (validasi manual)
-            btn_save = st.form_submit_button("💾 SIMPAN DATA", type="primary")
-            
-            if btn_save:
-                if in_nama and in_ktp:
-                    new_row = {
-                        "No": 0, "Tanggal": tgl_skrg, "Nama": in_nama, "No KTP": in_ktp,
-                        "Keperluan": in_perlu, "Jumlah Tamu": int(in_jml),
-                        "Visitor Id": in_id, "Jam Masuk": format_jam(in_jam),
-                        "Jam Keluar": "-", "Status": "IN"
-                    }
-                    sync_data(pd.concat([df, pd.DataFrame([new_row])], ignore_index=True))
-                    st.success(f"Data {in_nama} berhasil disimpan!")
-                    st.rerun()
-                else:
-                    st.error("Nama dan KTP wajib diisi!")
+        # Menggunakan st.container() alih-alih st.form() untuk kontrol tombol manual
+        in_nama = st.text_input("Nama Lengkap", key="in_nama")
+        in_ktp = st.text_input("No KTP", key="in_ktp")
+        in_perlu = st.text_input("Keperluan", key="in_perlu")
+        in_id = st.text_input("Visitor ID", key="in_id")
+        in_jml = st.number_input("Jumlah Tamu", min_value=1, value=1, key="in_jml")
+        in_jam = st.text_input("Jam Masuk (Contoh: 0800)", key="in_jam")
+        
+        # Tombol manual (bukan form submit)
+        if st.button("💾 SIMPAN DATA", type="primary"):
+            if in_nama and in_ktp:
+                new_row = {
+                    "No": 0, "Tanggal": tgl_skrg, "Nama": in_nama, "No KTP": in_ktp,
+                    "Keperluan": in_perlu, "Jumlah Tamu": int(in_jml),
+                    "Visitor Id": in_id, "Jam Masuk": format_jam(in_jam),
+                    "Jam Keluar": "-", "Status": "IN"
+                }
+                sync_data(pd.concat([df, pd.DataFrame([new_row])], ignore_index=True))
+                st.success(f"Berhasil menyimpan {in_nama}")
+                st.rerun()
+            else:
+                st.error("Nama dan KTP wajib diisi!")
 
     with col_out:
         st.subheader("🚪 Check-Out")
         list_in = df[df['Status'] == 'IN']['Nama'].tolist()
         if list_in:
-            with st.form("form_checkout", clear_on_submit=True):
-                target = st.selectbox("Pilih Nama", list_in)
-                out_jam = st.text_input("Jam Keluar (Contoh: 1700)")
-                btn_out = st.form_submit_button("🚪 KONFIRMASI KELUAR")
-                
-                if btn_out:
-                    if out_jam:
-                        idx = df[df['Nama'] == target].index[-1]
-                        df.at[idx, 'Jam Keluar'] = format_jam(out_jam)
-                        df.at[idx, 'Status'] = 'OUT'
-                        sync_data(df)
-                        st.success(f"{target} telah Check-Out.")
-                        st.rerun()
-                    else:
-                        st.warning("Isi jam keluar dahulu.")
+            target = st.selectbox("Pilih Nama", list_in)
+            out_jam = st.text_input("Jam Keluar (Contoh: 1700)", key="out_jam")
+            
+            if st.button("🚪 KONFIRMASI KELUAR"):
+                if out_jam:
+                    idx = df[df['Nama'] == target].index[-1]
+                    df.at[idx, 'Jam Keluar'] = format_jam(out_jam)
+                    df.at[idx, 'Status'] = 'OUT'
+                    sync_data(df)
+                    st.success(f"{target} berhasil keluar.")
+                    st.rerun()
+                else:
+                    st.warning("Isi jam keluar dahulu.")
         else:
             st.info("Tidak ada tamu aktif.")
 
 with tab_manage:
-    st.subheader("🛠️ Edit & Koreksi Data")
-    q_manage = st.text_input("Cari Nama/KTP di Database:")
+    st.subheader("🛠️ Manajemen Database")
+    q_manage = st.text_input("Cari Nama/KTP:")
     if q_manage:
         df_edit = df[df['Nama'].str.contains(q_manage, case=False) | df['No KTP'].astype(str).str.contains(q_manage)]
         for idx, row in df_edit.iterrows():
-            with st.expander(f"Edit: {row['Nama']} ({row['Tanggal']})"):
-                with st.form(f"edt_{idx}"):
-                    c1, c2 = st.columns(2)
-                    en = c1.text_input("Nama", value=row['Nama'])
-                    ek = c1.text_input("KTP", value=str(row['No KTP']))
-                    ep = c2.text_input("Keperluan", value=row['Keperluan'])
-                    ejm = c2.text_input("Jam Masuk", value=row['Jam Masuk'])
-                    ejk = c2.text_input("Jam Keluar", value=row['Jam Keluar'])
-                    est = st.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1)
-                    
-                    if st.form_submit_button("💾 UPDATE"):
-                        df.at[idx, 'Nama'], df.at[idx, 'No KTP'] = en, ek
-                        df.at[idx, 'Keperluan'] = ep
-                        df.at[idx, 'Jam Masuk'], df.at[idx, 'Jam Keluar'] = ejm, ejk
-                        df.at[idx, 'Status'] = est
-                        sync_data(df)
-                        st.rerun()
+            with st.expander(f"Edit: {row['Nama']}"):
+                en = st.text_input("Edit Nama", value=row['Nama'], key=f"en_{idx}")
+                ep = st.text_input("Edit Keperluan", value=row['Keperluan'], key=f"ep_{idx}")
+                est = st.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1, key=f"est_{idx}")
                 
-                if st.button(f"🗑️ HAPUS BARIS INI", key=f"del_{idx}"):
+                if st.button("💾 UPDATE DATA", key=f"upd_{idx}"):
+                    df.at[idx, 'Nama'] = en
+                    df.at[idx, 'Keperluan'] = ep
+                    df.at[idx, 'Status'] = est
+                    sync_data(df)
+                    st.rerun()
+                
+                if st.button(f"🗑️ HAPUS BARIS", key=f"del_{idx}"):
                     sync_data(df.drop(idx))
                     st.rerun()
