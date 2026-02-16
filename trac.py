@@ -13,6 +13,20 @@ st.set_page_config(page_title="Visitor Management TRAC", layout="wide")
 def get_waktu_wib():
     return datetime.utcnow() + timedelta(hours=7)
 
+# --- HEADER DENGAN PENGECEKAN LOGO ---
+col_logo, col_text = st.columns([1, 5])
+with col_logo:
+    # Mengecek apakah file ada di folder aplikasi
+    if os.path.exists("trac.png"):
+        st.image("trac.png", width=150)
+    else:
+        # Jika file hilang, tampilkan placeholder atau teks agar tidak kosong
+        st.warning("⚠️ Logo trac.png tidak ditemukan di GitHub")
+
+with col_text:
+    st.title("Visitor Management - GRHA TRAC")
+    st.subheader(f"🕒 {waktu_wib.strftime('%H:%M')} WIB")
+
 # --- FUNGSI FORMAT JAM (HHMM -> HH:MM) ---
 def format_jam(input_jam):
     if not input_jam or input_jam == "-": return "-"
