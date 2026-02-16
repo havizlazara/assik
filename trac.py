@@ -16,7 +16,7 @@ def get_waktu_wib():
 waktu_wib = get_waktu_wib()
 tgl_skrg = waktu_wib.strftime("%d-%m-%Y")
 
-# --- 3. FUNGSI FORMAT JAM ---
+# --- 3. FUNGSI FORMAT JAM (HHMM -> HH:MM) ---
 def format_jam(input_jam):
     if not input_jam or input_jam == "-": return "-"
     digits = "".join(filter(str.isdigit, str(input_jam)))
@@ -83,28 +83,24 @@ if search_ktp:
     history = df[df['No KTP'].astype(str) == search_ktp].copy()
     if not history.empty:
         st.sidebar.success(f"Nama: {history['Nama'].iloc[-1]}")
-        st.sidebar.info(f"Kunjungan: {len(history)} kali")
         st.sidebar.dataframe(history[['Tanggal', 'Keperluan']].sort_index(ascending=False), hide_index=True)
 
 st.sidebar.markdown("---")
 view_opt = st.sidebar.selectbox("Filter Tampilan:", ["Hari Ini Saja", "Semua Riwayat"])
 
-# Logika Filter
 if view_opt == "Hari Ini Saja":
     df_filtered = df[df['Tanggal'] == tgl_skrg].copy()
 else:
     df_filtered = df.copy()
 
-# Reset nomor urut visual di tabel (Mulai dari 1)
 if not df_filtered.empty:
     df_filtered['No'] = range(1, len(df_filtered) + 1)
 
-# --- TOMBOL DOWNLOAD EXCEL (MUNCUL KEMBALI) ---
+# TOMBOL DOWNLOAD EXCEL
 if not df_filtered.empty:
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
         df_filtered.to_excel(writer, index=False, sheet_name='Data_Visitor')
-    
     st.sidebar.download_button(
         label=f"📥 Download Excel ({view_opt})",
         data=buffer.getvalue(),
@@ -124,19 +120,21 @@ with tab_reg:
     
     with col_in:
         st.subheader("➕ Check-In")
-        # Menggunakan session state manual tanpa st.form untuk MEMATIKAN Enter-submit
-        # Jika session state belum ada, buat dulu
-        if "nama_in" not in st.session_state: st.session_state.nama_in = ""
-        if "ktp_in" not in st.session_state: st.session_state.ktp_in = ""
+        # --- LOGIKA FORM RESET ---
+        # Kita gunakan key yang berubah setiap kali rerun untuk memaksa widget reset total
+        if "form_id" not in st.session_state:
+            st.session_state.form_id = 0
+
+        # Semua input menggunakan key dinamis berdasarkan form_id
+        suffix = str(st.session_state.form_id)
+        in_nama = st.text_input("Nama Lengkap", key="nama"+suffix)
+        in_ktp = st.text_input("No KTP", key="ktp"+suffix)
+        in_perlu = st.text_input("Keperluan", key="perlu"+suffix)
+        in_id = st.text_input("Visitor ID", key="id"+suffix)
+        in_jml = st.number_input("Jumlah Tamu", min_value=1, value=1, key="jml"+suffix)
+        in_jam = st.text_input("Jam Masuk (Contoh: 0800)", key="jam"+suffix)
         
-        in_nama = st.text_input("Nama Lengkap", value=st.session_state.nama_in, key="in_nama_box")
-        in_ktp = st.text_input("No KTP", value=st.session_state.ktp_in, key="in_ktp_box")
-        in_perlu = st.text_input("Keperluan", key="in_perlu_box")
-        in_id = st.text_input("Visitor ID", key="in_id_box")
-        in_jml = st.number_input("Jumlah Tamu", min_value=1, value=1, key="in_jml_box")
-        in_jam = st.text_input("Jam Masuk (Contoh: 0800)", key="in_jam_box")
-        
-        # Tombol Simpan Manual
+        # Tombol Simpan
         if st.button("💾 SIMPAN DATA", type="primary"):
             if in_nama and in_ktp:
                 new_row = {
@@ -147,7 +145,8 @@ with tab_reg:
                 }
                 sync_data(pd.concat([df, pd.DataFrame([new_row])], ignore_index=True))
                 
-                # Membersihkan form dengan trigger rerun tanpa error
+                # UPDATE FORM_ID: Ini akan memaksa semua widget dengan key baru (kosong)
+                st.session_state.form_id += 1
                 st.success(f"Data {in_nama} berhasil disimpan!")
                 st.rerun()
             else:
@@ -157,8 +156,9 @@ with tab_reg:
         st.subheader("🚪 Check-Out")
         list_in = df[df['Status'] == 'IN']['Nama'].tolist()
         if list_in:
-            target = st.selectbox("Pilih Nama", list_in, key="sel_out")
-            out_jam = st.text_input("Jam Keluar (Contoh: 1700)", key="out_jam_box")
+            # Gunakan key dinamis juga untuk checkout agar dropdown reset
+            target = st.selectbox("Pilih Nama", list_in, key="target"+suffix)
+            out_jam = st.text_input("Jam Keluar (Contoh: 1700)", key="outjam"+suffix)
             
             if st.button("🚪 KONFIRMASI KELUAR"):
                 if out_jam:
@@ -166,6 +166,8 @@ with tab_reg:
                     df.at[idx, 'Jam Keluar'] = format_jam(out_jam)
                     df.at[idx, 'Status'] = 'OUT'
                     sync_data(df)
+                    
+                    st.session_state.form_id += 1
                     st.success(f"{target} berhasil Check-Out.")
                     st.rerun()
                 else:
@@ -175,7 +177,7 @@ with tab_reg:
 
 with tab_manage:
     st.subheader("🛠️ Manajemen Database")
-    q = st.text_input("Cari Nama/KTP untuk koreksi:")
+    q = st.text_input("Cari Nama/KTP:")
     if q:
         df_edit = df[df['Nama'].str.contains(q, case=False) | df['No KTP'].astype(str).str.contains(q)]
         for idx, row in df_edit.iterrows():
@@ -185,9 +187,7 @@ with tab_manage:
                     ek = st.text_input("KTP", value=str(row['No KTP']))
                     est = st.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1)
                     if st.form_submit_button("💾 UPDATE"):
-                        df.at[idx, 'Nama'] = en
-                        df.at[idx, 'No KTP'] = ek
-                        df.at[idx, 'Status'] = est
+                        df.at[idx, 'Nama'], df.at[idx, 'No KTP'], df.at[idx, 'Status'] = en, ek, est
                         sync_data(df)
                         st.rerun()
                 if st.button("🗑️ HAPUS", key=f"del_{idx}"):
