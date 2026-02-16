@@ -6,28 +6,18 @@ from datetime import datetime, timedelta
 import os
 import io
 
-# --- KONFIGURASI HALAMAN ---
+# --- 1. KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Visitor Management TRAC", layout="wide")
 
-# --- FUNGSI ZONA WAKTU WIB ---
+# --- 2. FUNGSI ZONA WAKTU WIB (PENTING: Harus di atas) ---
 def get_waktu_wib():
     return datetime.utcnow() + timedelta(hours=7)
 
-# --- HEADER DENGAN PENGECEKAN LOGO ---
-col_logo, col_text = st.columns([1, 5])
-with col_logo:
-    # Mengecek apakah file ada di folder aplikasi
-    if os.path.exists("trac.png"):
-        st.image("trac.png", width=150)
-    else:
-        # Jika file hilang, tampilkan placeholder atau teks agar tidak kosong
-        st.warning("⚠️ Logo trac.png tidak ditemukan di GitHub")
+# Panggil fungsi agar variabel tersedia untuk seluruh aplikasi
+waktu_wib = get_waktu_wib()
+tgl_skrg = waktu_wib.strftime("%d-%m-%Y")
 
-with col_text:
-    st.title("Visitor Management - GRHA TRAC")
-    st.subheader(f"🕒 {waktu_wib.strftime('%H:%M')} WIB")
-
-# --- FUNGSI FORMAT JAM (HHMM -> HH:MM) ---
+# --- 3. FUNGSI FORMAT JAM ---
 def format_jam(input_jam):
     if not input_jam or input_jam == "-": return "-"
     digits = "".join(filter(str.isdigit, str(input_jam)))
@@ -37,7 +27,7 @@ def format_jam(input_jam):
         return f"0{digits[0]}:{digits[1:]}"
     return input_jam
 
-# --- KONEKSI GOOGLE SHEETS ---
+# --- 4. KONEKSI GOOGLE SHEETS ---
 @st.cache_resource
 def init_connection():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -54,63 +44,63 @@ def init_connection():
 
 sheet = init_connection()
 
-# --- FUNGSI DATA & SYNC ---
+# --- 5. FUNGSI DATA & SYNC ---
 def fetch_data():
     try:
         data = sheet.get_all_records()
         if not data:
             return pd.DataFrame(columns=["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"])
         df = pd.DataFrame(data)
-        df = df[df['Nama'] != ""]
-        df = df.dropna(how='all')
+        df = df[df['Nama'] != ""].dropna(how='all')
         return df
     except:
         return pd.DataFrame(columns=["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"])
 
 def sync_data(df_baru):
-    # Membersihkan data dan mereset nomor urut database (Google Sheets)
     df_baru = df_baru[df_baru['Nama'] != ""].reset_index(drop=True)
     df_baru['No'] = range(1, len(df_baru) + 1)
-    
-    # Pastikan urutan kolom sesuai
     cols = ['No', 'Tanggal', 'Nama', 'No KTP', 'Keperluan', 'Jumlah Tamu', 'Visitor Id', 'Jam Masuk', 'Jam Keluar', 'Status']
     df_baru = df_baru[cols].fillna("-")
-    
     sheet.clear()
     sheet.update([df_baru.columns.values.tolist()] + df_baru.values.tolist())
 
-# Load data awal
+# Load data dari Google Sheets
 df = fetch_data()
-waktu_wib = get_waktu_wib()
-tgl_skrg = waktu_wib.strftime("%d-%m-%Y")
 
-# --- SIDEBAR: PENCARIAN & DOWNLOAD ---
+# --- 6. HEADER ---
+col_logo, col_text = st.columns([1, 5])
+with col_logo:
+    if os.path.exists("trac.png"):
+        st.image("trac.png", width=150)
+with col_text:
+    st.title("Visitor Management - GRHA TRAC")
+    # Variabel waktu_wib sekarang sudah aman dipanggil di sini
+    st.subheader(f"🕒 {waktu_wib.strftime('%H:%M')} WIB | 📅 {waktu_wib.strftime('%d %B %Y')}")
+
+st.markdown("---")
+
+# --- 7. SIDEBAR ---
 st.sidebar.title("📊 Menu Utama")
-st.sidebar.subheader("Cek Riwayat KTP")
 search_ktp = st.sidebar.text_input("Cari No KTP:")
 if search_ktp:
     history = df[df['No KTP'].astype(str) == search_ktp].copy()
     if not history.empty:
         st.sidebar.success(f"Nama: {history['Nama'].iloc[-1]}")
-        st.sidebar.info(f"Kunjungan: {len(history)} kali")
         st.sidebar.dataframe(history[['Tanggal', 'Keperluan']].sort_index(ascending=False), hide_index=True)
-    else:
-        st.sidebar.warning("KTP belum terdaftar.")
 
 st.sidebar.markdown("---")
 view_opt = st.sidebar.selectbox("Filter Tampilan:", ["Hari Ini Saja", "Semua Riwayat"])
 
-# Logika Filter Data Tampilan
+# Logika Filter & Reset Nomor Visual
 if view_opt == "Hari Ini Saja":
     df_filtered = df[df['Tanggal'] == tgl_skrg].copy()
 else:
     df_filtered = df.copy()
 
-# RESET NOMOR URUT VISUAL (Agar selalu mulai dari 1 di tabel)
 if not df_filtered.empty:
     df_filtered['No'] = range(1, len(df_filtered) + 1)
 
-# Tombol Download Excel di Sidebar
+# Tombol Download Excel
 if not df_filtered.empty:
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
@@ -122,16 +112,12 @@ if not df_filtered.empty:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-# --- UI UTAMA DENGAN TAB ---
+# --- 8. UI UTAMA ---
 tab_reg, tab_manage = st.tabs(["📝 Registrasi & Daftar", "⚙️ Kelola Data"])
 
 with tab_reg:
-    st.title("🏛️ GRHA TRAC")
-    st.subheader(f"🕒 {waktu_wib.strftime('%H:%M')} WIB | 📅 {waktu_wib.strftime('%d %B %Y')}")
-    
-    # Menampilkan tabel hasil filter dengan nomor urut yang sudah di-reset
     if df_filtered.empty:
-        st.info(f"Belum ada data kunjungan untuk filter: {view_opt}")
+        st.info(f"Belum ada data untuk filter: {view_opt}")
     else:
         st.dataframe(df_filtered, use_container_width=True, hide_index=True)
 
@@ -147,7 +133,6 @@ with tab_reg:
             in_id = st.text_input("Visitor ID")
             in_jml = st.number_input("Jumlah Tamu", min_value=1, value=1)
             in_jam = st.text_input("Jam Masuk (Contoh: 0830)")
-            
             if st.form_submit_button("💾 SIMPAN DATA", type="primary"):
                 if in_nama and in_ktp:
                     new_row = {
@@ -158,8 +143,6 @@ with tab_reg:
                     }
                     sync_data(pd.concat([df, pd.DataFrame([new_row])], ignore_index=True))
                     st.rerun()
-                else:
-                    st.error("Nama & KTP wajib diisi!")
 
     with col_out:
         st.subheader("🚪 Check-Out")
@@ -174,8 +157,6 @@ with tab_reg:
                     df.at[idx, 'Status'] = 'OUT'
                     sync_data(df)
                     st.rerun()
-        else:
-            st.info("Tidak ada tamu aktif.")
 
 with tab_manage:
     st.subheader("🛠️ Manajemen Database")
@@ -193,7 +174,6 @@ with tab_manage:
                     ejm = c2.text_input("Jam Masuk", value=row['Jam Masuk'])
                     ejk = c2.text_input("Jam Keluar", value=row['Jam Keluar'])
                     est = st.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1)
-                    
                     if st.form_submit_button("💾 UPDATE"):
                         df.at[idx, 'Nama'], df.at[idx, 'No KTP'] = en, ek
                         df.at[idx, 'Keperluan'], df.at[idx, 'Visitor Id'] = ep, eid
@@ -201,7 +181,6 @@ with tab_manage:
                         df.at[idx, 'Status'] = est
                         sync_data(df)
                         st.rerun()
-                
                 if st.button(f"🗑️ HAPUS DATA", key=f"del_{idx}"):
                     sync_data(df.drop(idx))
                     st.rerun()
