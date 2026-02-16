@@ -10,7 +10,7 @@ import io
 st.set_page_config(page_title="Visitor Management TRAC", layout="wide")
 
 # --- 2. SISTEM KEAMANAN (LOGIN) ---
-# Tentukan Password Admin di sini
+# Silakan ganti password sesuai keinginan Anda
 ADMIN_PASSWORD = "tracadmin123" 
 
 if "authenticated" not in st.session_state:
@@ -23,7 +23,7 @@ def get_waktu_wib():
 waktu_wib = get_waktu_wib()
 tgl_skrg = waktu_wib.strftime("%d-%m-%Y")
 
-# --- 4. FUNGSI FORMAT JAM ---
+# --- 4. FUNGSI FORMAT JAM (HHMM -> HH:MM) ---
 def format_jam(input_jam):
     if not input_jam or input_jam == "-": return "-"
     digits = "".join(filter(str.isdigit, str(input_jam)))
@@ -54,6 +54,8 @@ sheet = init_connection()
 def fetch_data():
     try:
         data = sheet.get_all_records()
+        if not data:
+            return pd.DataFrame(columns=["No", "Tanggal", "Nama", "No KTP", "Keperluan", "Jumlah Tamu", "Visitor Id", "Jam Masuk", "Jam Keluar", "Status"])
         df = pd.DataFrame(data)
         df = df[df['Nama'] != ""].dropna(how='all')
         return df
@@ -81,12 +83,12 @@ with col_text:
 
 st.markdown("---")
 
-# --- 8. SIDEBAR (PENCARIAN, FILTER & LOGIN) ---
+# --- 8. SIDEBAR (LOGIN, PENCARIAN & DOWNLOAD) ---
 st.sidebar.title("📊 Menu Utama")
 
-# Form Login di Sidebar
+# Login Section
 if not st.session_state.authenticated:
-    pwd_input = st.sidebar.text_input("🔑 Admin Login", type="password", placeholder="Masukkan Password")
+    pwd_input = st.sidebar.text_input("🔑 Admin Login", type="password")
     if st.sidebar.button("Login"):
         if pwd_input == ADMIN_PASSWORD:
             st.session_state.authenticated = True
@@ -100,33 +102,58 @@ else:
         st.rerun()
 
 st.sidebar.markdown("---")
-view_opt = st.sidebar.selectbox("Filter Tampilan:", ["Hari Ini Saja", "Semua Riwayat"])
 
-# Logika Filter
+# FITUR PENCARIAN NO KTP (Dimunculkan Kembali)
+st.sidebar.subheader("🔍 Cek Riwayat Tamu")
+search_ktp = st.sidebar.text_input("Masukkan No KTP:")
+if search_ktp:
+    # Filter data berdasarkan KTP
+    history = df[df['No KTP'].astype(str) == search_ktp].copy()
+    if not history.empty:
+        nama_tamu = history['Nama'].iloc[-1]
+        st.sidebar.success(f"**Nama:** {nama_tamu}")
+        st.sidebar.info(f"📋 Total Kunjungan: **{len(history)} kali**")
+        st.sidebar.write("**Daftar Keperluan:**")
+        # Menampilkan tabel ringkas riwayat
+        st.sidebar.dataframe(
+            history[['Tanggal', 'Keperluan', 'Status']].sort_index(ascending=False), 
+            hide_index=True
+        )
+    else:
+        st.sidebar.warning("Data KTP belum pernah terdaftar.")
+
+st.sidebar.markdown("---")
+
+# Filter Tampilan & Download
+view_opt = st.sidebar.selectbox("Filter Tampilan Tabel:", ["Hari Ini Saja", "Semua Riwayat"])
 df_filtered = df[df['Tanggal'] == tgl_skrg].copy() if view_opt == "Hari Ini Saja" else df.copy()
 
 if not df_filtered.empty:
     df_filtered['No'] = range(1, len(df_filtered) + 1)
-
-# Tombol Download (Hanya Admin)
-if st.session_state.authenticated and not df_filtered.empty:
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-        df_filtered.to_excel(writer, index=False, sheet_name='Data_Visitor')
-    st.sidebar.download_button(label="📥 Download Excel", data=buffer.getvalue(), file_name=f"Visitor_TRAC_{tgl_skrg}.xlsx")
+    
+    # Download Button (Hanya Admin)
+    if st.session_state.authenticated:
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            df_filtered.to_excel(writer, index=False, sheet_name='Data_Visitor')
+        st.sidebar.download_button(
+            label="📥 Download Excel", 
+            data=buffer.getvalue(), 
+            file_name=f"Visitor_TRAC_{tgl_skrg}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 # --- 9. UI UTAMA ---
 if st.session_state.authenticated:
     tab_reg, tab_manage = st.tabs(["📝 Registrasi & Daftar", "⚙️ Kelola Data"])
 else:
-    st.info("💡 Anda dalam mode **VIEWER**. Silakan login di sidebar untuk menambah/mengedit data.")
-    tab_reg = st.container() # Viewer hanya punya akses ke tabel daftar
+    st.info("💡 Mode **VIEWER**. Login di sidebar untuk menambah atau mengedit data.")
+    tab_reg = st.container()
 
 with tab_reg:
     st.subheader(f"📋 Tabel Pengunjung ({view_opt})")
     st.dataframe(df_filtered, use_container_width=True, hide_index=True)
     
-    # BAGIAN INPUT (Hanya Muncul Jika Sudah Login Admin)
     if st.session_state.authenticated:
         st.markdown("---")
         col_in, col_out = st.columns(2)
@@ -141,13 +168,14 @@ with tab_reg:
             in_perlu = st.text_input("Keperluan", key="p"+suffix)
             in_id = st.text_input("Visitor ID", key="id"+suffix)
             in_jml = st.number_input("Jumlah Tamu", min_value=1, value=1, key="j"+suffix)
-            in_jam = st.text_input("Jam Masuk (HHMM)", key="jam"+suffix)
+            in_jam = st.text_input("Jam Masuk (Contoh: 0800)", key="jam"+suffix)
             
+            # Button manual (Tanpa st.form untuk cegah Enter-submit)
             if st.button("💾 SIMPAN DATA", type="primary"):
                 if in_nama and in_ktp:
                     new_row = {"No": 0, "Tanggal": tgl_skrg, "Nama": in_nama, "No KTP": in_ktp, "Keperluan": in_perlu, "Jumlah Tamu": int(in_jml), "Visitor Id": in_id, "Jam Masuk": format_jam(in_jam), "Jam Keluar": "-", "Status": "IN"}
                     sync_data(pd.concat([df, pd.DataFrame([new_row])], ignore_index=True))
-                    st.session_state.form_id += 1
+                    st.session_state.form_id += 1 # Reset form via key change
                     st.rerun()
                 else:
                     st.error("Nama & KTP wajib diisi!")
@@ -157,7 +185,7 @@ with tab_reg:
             list_in = df[df['Status'] == 'IN']['Nama'].tolist()
             if list_in:
                 target = st.selectbox("Pilih Nama", list_in, key="t"+suffix)
-                out_jam = st.text_input("Jam Keluar (HHMM)", key="out"+suffix)
+                out_jam = st.text_input("Jam Keluar (Contoh: 1700)", key="out"+suffix)
                 if st.button("🚪 KONFIRMASI KELUAR"):
                     if out_jam:
                         idx = df[df['Nama'] == target].index[-1]
@@ -166,10 +194,11 @@ with tab_reg:
                         sync_data(df)
                         st.session_state.form_id += 1
                         st.rerun()
-    else:
-        st.caption("Gunakan sidebar untuk akses Admin jika ingin melakukan penginputan.")
+                    else:
+                        st.warning("Isi jam keluar dahulu.")
+            else:
+                st.info("Tidak ada tamu aktif.")
 
-# TAB KELOLA (Hanya Muncul Jika Admin)
 if st.session_state.authenticated:
     with tab_manage:
         st.subheader("🛠️ Manajemen Database")
