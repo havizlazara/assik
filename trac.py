@@ -63,6 +63,7 @@ def sync_data(df_baru):
     sheet.clear()
     sheet.update([df_baru.columns.values.tolist()] + df_baru.values.tolist())
 
+# Ambil data awal
 df = fetch_data()
 
 # --- 6. HEADER ---
@@ -96,6 +97,7 @@ if view_opt == "Hari Ini Saja":
 else:
     df_filtered = df.copy()
 
+# Reset nomor urut visual di tabel
 if not df_filtered.empty:
     df_filtered['No'] = range(1, len(df_filtered) + 1)
 
@@ -111,15 +113,14 @@ with tab_reg:
     
     with col_in:
         st.subheader("➕ Check-In")
-        # Menggunakan st.container() alih-alih st.form() untuk kontrol tombol manual
-        in_nama = st.text_input("Nama Lengkap", key="in_nama")
-        in_ktp = st.text_input("No KTP", key="in_ktp")
-        in_perlu = st.text_input("Keperluan", key="in_perlu")
-        in_id = st.text_input("Visitor ID", key="in_id")
-        in_jml = st.number_input("Jumlah Tamu", min_value=1, value=1, key="in_jml")
-        in_jam = st.text_input("Jam Masuk (Contoh: 0800)", key="in_jam")
+        # Menggunakan session state agar value bisa di-reset manual
+        in_nama = st.text_input("Nama Lengkap", key="nama_val")
+        in_ktp = st.text_input("No KTP", key="ktp_val")
+        in_perlu = st.text_input("Keperluan", key="perlu_val")
+        in_id = st.text_input("Visitor ID", key="id_val")
+        in_jml = st.number_input("Jumlah Tamu", min_value=1, value=1, key="jml_val")
+        in_jam = st.text_input("Jam Masuk (Contoh: 0800)", key="jam_val")
         
-        # Tombol manual (bukan form submit)
         if st.button("💾 SIMPAN DATA", type="primary"):
             if in_nama and in_ktp:
                 new_row = {
@@ -129,6 +130,16 @@ with tab_reg:
                     "Jam Keluar": "-", "Status": "IN"
                 }
                 sync_data(pd.concat([df, pd.DataFrame([new_row])], ignore_index=True))
+                
+                # --- LOGIKA RESET FORM ---
+                # Mengosongkan session state setelah data tersimpan
+                st.session_state["nama_val"] = ""
+                st.session_state["ktp_val"] = ""
+                st.session_state["perlu_val"] = ""
+                st.session_state["id_val"] = ""
+                st.session_state["jml_val"] = 1
+                st.session_state["jam_val"] = ""
+                
                 st.success(f"Berhasil menyimpan {in_nama}")
                 st.rerun()
             else:
@@ -139,7 +150,7 @@ with tab_reg:
         list_in = df[df['Status'] == 'IN']['Nama'].tolist()
         if list_in:
             target = st.selectbox("Pilih Nama", list_in)
-            out_jam = st.text_input("Jam Keluar (Contoh: 1700)", key="out_jam")
+            out_jam = st.text_input("Jam Keluar (Contoh: 1700)", key="out_jam_val")
             
             if st.button("🚪 KONFIRMASI KELUAR"):
                 if out_jam:
@@ -147,6 +158,10 @@ with tab_reg:
                     df.at[idx, 'Jam Keluar'] = format_jam(out_jam)
                     df.at[idx, 'Status'] = 'OUT'
                     sync_data(df)
+                    
+                    # Reset input jam keluar
+                    st.session_state["out_jam_val"] = ""
+                    
                     st.success(f"{target} berhasil keluar.")
                     st.rerun()
                 else:
@@ -162,12 +177,12 @@ with tab_manage:
         for idx, row in df_edit.iterrows():
             with st.expander(f"Edit: {row['Nama']}"):
                 en = st.text_input("Edit Nama", value=row['Nama'], key=f"en_{idx}")
-                ep = st.text_input("Edit Keperluan", value=row['Keperluan'], key=f"ep_{idx}")
+                ek = st.text_input("Edit KTP", value=str(row['No KTP']), key=f"ek_{idx}")
                 est = st.selectbox("Status", ["IN", "OUT"], index=0 if row['Status']=="IN" else 1, key=f"est_{idx}")
                 
                 if st.button("💾 UPDATE DATA", key=f"upd_{idx}"):
                     df.at[idx, 'Nama'] = en
-                    df.at[idx, 'Keperluan'] = ep
+                    df.at[idx, 'No KTP'] = ek
                     df.at[idx, 'Status'] = est
                     sync_data(df)
                     st.rerun()
